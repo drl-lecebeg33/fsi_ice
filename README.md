@@ -8,6 +8,8 @@
 - [开发目标与里程碑](gola.md)
 - [任务分工与交付流程](agent.md)
 - [代理协作规则](AGENTS.md)
+- [原理说明（初学者，浏览器打开）](docs/principles/index.html)
+- [原理文档维护约定](docs/principles/维护说明.md)
 - [Python 环境与验证记录](docs/environment.md)
 - [M0 数值基础验收记录](docs/validation/m0.md)
 - [固体与流体单场验证](docs/validation/single_fields.md)

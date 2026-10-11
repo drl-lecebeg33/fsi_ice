@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原理说明 · fsi_ice 流固耦合研究平台</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#5c6470; --line:#e2e6ea; --bg:#ffffff; --code:#f4f6f8; --accent:#245b8f; }
+  * { box-sizing: border-box; }
+  body { margin:0; color:var(--fg); background:var(--bg);
+         font-family: system-ui, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+         line-height:1.7; }
+  header { padding: 1.6rem 1.2rem; border-bottom:1px solid var(--line); }
+  main { max-width: 900px; margin:0 auto; padding: 1.2rem; }
+  h1 { font-size:1.5rem; margin:0 0 .3rem; }
+  h2 { font-size:1.15rem; margin:2rem 0 .6rem; padding-bottom:.3rem; border-bottom:1px solid var(--line); }
+  h3 { font-size:1rem; margin:1.2rem 0 .4rem; }
+  p, li { font-size:.98rem; }
+  code { background:var(--code); padding:.1rem .35rem; border-radius:4px;
+         font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size:.9em; }
+  pre { background:var(--code); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; font-size:.88rem; }
+  a { color:var(--accent); }
+  nav ul { list-style:none; padding:0; display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:.8rem 0 0; }
+  nav a { font-size:.92rem; }
+  .badge { display:inline-block; font-size:.75rem; padding:.05rem .5rem; border-radius:10px;
+           border:1px solid var(--line); color:var(--muted); vertical-align:middle; white-space:nowrap; }
+  .b-impl { border-color:#9bc59b; color:#2f6b2f; }
+  .b-ver  { border-color:#8fb8dd; color:#245b8f; }
+  .b-plan { border-color:#d8c48f; color:#8a6d1f; }
+  table { border-collapse: collapse; width:100%; margin:.6rem 0; font-size:.92rem; }
+  th, td { border:1px solid var(--line); padding:.4rem .6rem; text-align:left; vertical-align:top; }
+  th { background:var(--code); }
+  td, th { overflow-wrap:anywhere; }
+  .muted { color:var(--muted); }
+  .note { border-left:3px solid var(--accent); padding:.4rem .8rem; background:var(--code); font-size:.92rem; }
+  figure { margin:1rem 0; }
+  figcaption { font-size:.85rem; color:var(--muted); margin-top:.3rem; }
+  footer { border-top:1px solid var(--line); margin-top:2rem; padding:1rem 1.2rem; font-size:.85rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>原理说明</h1>
+  <p class="muted">fsi_ice 流固耦合研究平台 · 面向初学者 · 本页可离线打开</p>
+  <nav>
+    <ul>
+      <li><a href="#goal">这个项目做什么</a></li>
+      <li><a href="#status">当前状态</a></li>
+      <li><a href="#lifecycle">一次计算做什么</a></li>
+      <li><a href="#concepts">核心概念</a></li>
+      <li><a href="#fields">各模块怎么做</a></li>
+      <li><a href="#coupling">耦合怎么做</a></li>
+      <li><a href="#trust">怎么判断算得对</a></li>
+      <li><a href="#run">工具链与运行</a></li>
+      <li><a href="#record">更新记录</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+
+<section id="goal">
+  <h2>这个项目要做什么</h2>
+  <p>
+    fsi_ice 是一个用 Python 从零实现的<strong>流固耦合（FSI）研究平台</strong>：
+    流体、固体、动网格、界面传递和耦合算法全部自研，不调用现成求解器；
+    只使用 NumPy/SciPy 做数组与线性代数、Matplotlib 画图、pytest 做测试。
+  </p>
+  <p>
+    目标不是"能算一个例子"，而是<strong>公平地比较方法</strong>：分区耦合和整体耦合必须求解<strong>同一个离散物理问题</strong>——
+    相同的网格、材料、边界、时间步和物理残差——然后比较精度、稳定性、收敛性和计算成本。
+    基准采用公开的 Turek–Hron FSI1/FSI2，单场则用 Poisson 制造解、CSM 系列（固体）、CFD 系列（流体）等逐级建立可信度。
+  </p>
+  <p class="muted">
+    阅读提示：本页解释"为什么这样算、每一步做什么、怎么确认可信"，不假设读者学过有限元。
+    范围、验收门槛与规范以 <a href="../../spec.md">spec.md</a> 为准，阶段进度以 <a href="../../gola.md">gola.md</a> 为准，
+    更细的任务分工见 <a href="../../agent.md">agent.md</a>。
+  </p>
+</section>
+
+<section id="status">
+  <h2>现在做到哪一步</h2>
+  <div class="note">
+    截至 2026-10-11：<strong>M0–M4 已完成并通过本地数值验收</strong>（数值基础、固体、流体、ALE/界面/全场事务、分区耦合与稳态 FSI1）。
+    完整瞬态 FSI、整体耦合和 FSI2 尚未实现。下面用三档标记，避免把计划当成成果。
+  </div>
+  <p>
+    <span class="badge b-impl">已实现</span> 代码存在 ·
+    <span class="badge b-ver">已验证</span> 有本地运行证据 ·
+    <span class="badge b-plan">计划</span> 尚未开始
+  </p>
+  <table>
+    <thead><tr><th>内容</th><th>状态</th><th>说明 / 证据</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>M0 数值基础：三角形网格、P1 形函数、积分、稀疏组装、Dirichlet、Poisson 制造解</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>三网格收敛：L2 阶 1.994、H1 半范阶 0.997（门槛 1.8/0.9）；<a href="../validation/m0.md">M0 记录</a></td>
+      </tr>
+      <tr>
+        <td>M1 固体：线弹性、StVK 有限变形、BDF1/BDF2 动力学</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>CSM1/2 最细网格 y 误差 0.536%/0.546%；CSM3 频率误差 0.481%、振幅误差 2.10%；<a href="../validation/single_fields.md">单场记录</a></td>
+      </tr>
+      <tr>
+        <td>M2 流体：P2/P1 Taylor–Hood、Stokes、Navier–Stokes、BDF 瞬态</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>空间阶速度 3.02、压力 2.13；CFD3 频率误差 0.488%、升力振幅误差 0.378%；<a href="../validation/single_fields.md">单场记录</a></td>
+      </tr>
+      <tr>
+        <td>M3 ALE 与界面：调和动网格、几何守恒（GCL）、运动/载荷映射、全场事务回滚</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>验收矩阵 41/41 条目通过；<a href="../validation/m3.md">M3 矩阵</a>、<a href="../development/m3_freeze.md">接口冻结</a></td>
+      </tr>
+      <tr>
+        <td>M4 分区耦合：Dirichlet–Neumann、固定松弛、Aitken；稳态 FSI1</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>FSI1 最细网格 y 位移误差 4.076%、阻力误差 0.394%（门槛 5%）；<a href="../validation/t18.md">T18</a>、<a href="../validation/t19.md">T19</a>、<a href="../validation/t20.md">T20</a></td>
+      </tr>
+      <tr>
+        <td>M5 整体耦合：统一残差、含界面/网格依赖的耦合 Jacobian、Newton 求解</td>
+        <td><span class="badge b-plan">计划</span></td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>M6 FSI2 瞬态、IQN-ILS、四种耦合算法公平比较与报告</td>
+        <td><span class="badge b-plan">计划</span></td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="muted">
+    当前全量回归 <strong>432 项测试通过</strong>（本页维护时本地实际运行，约 124 s）。
+    测试通过只表示预设检查通过；没有证据的功能不在此写"已验证"。
+  </p>
+</section>
+
+<section id="lifecycle">
+  <h2>一次计算会经历什么</h2>
+  <p>
+    把"算一个算例"拆成固定步骤，每步只做一件事，方便单独替换和验证。
+    以稳态 FSI1（代码 <a href="../../src/fsi_ice/validation/fsi1.py">validation/fsi1.py</a>）为例：
+  </p>
+  <figure>
+    <svg viewBox="0 0 900 120" width="100%" role="img" aria-label="一次 FSI 计算的流程">
+      <defs>
+        <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#5c6470"/>
+        </marker>
+      </defs>
+      <g font-size="12" text-anchor="middle" fill="#1a1a1a">
+        <g>
+          <rect x="4" y="30" width="122" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="65" y="52">读配置</text><text x="65" y="70" font-size="10" fill="#5c6470">cases/*.json</text>
+        </g>
+        <g>
+          <rect x="148" y="30" width="122" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="209" y="52">双域网格</text><text x="209" y="70" font-size="10" fill="#5c6470">流体 + 固体</text>
+        </g>
+        <g>
+          <rect x="292" y="30" width="150" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="367" y="52">候选步</text><text x="367" y="70" font-size="10" fill="#5c6470">动网格→流体→界面→固体</text>
+        </g>
+        <g>
+          <rect x="464" y="30" width="122" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="525" y="52">耦合迭代</text><text x="525" y="70" font-size="10" fill="#5c6470">固定 / Aitken</text>
+        </g>
+        <g>
+          <rect x="608" y="30" width="122" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="669" y="52">事务接受</text><text x="669" y="70" font-size="10" fill="#5c6470">接受或回滚</text>
+        </g>
+        <g>
+          <rect x="752" y="30" width="144" height="52" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="824" y="52">报告与图表</text><text x="824" y="70" font-size="10" fill="#5c6470">残差 / 守恒 / 迭代</text>
+        </g>
+      </g>
+      <g stroke="#5c6470" stroke-width="1.5" marker-end="url(#arw)">
+        <line x1="126" y1="56" x2="146" y2="56"/>
+        <line x1="270" y1="56" x2="290" y2="56"/>
+        <line x1="442" y1="56" x2="462" y2="56"/>
+        <line x1="586" y1="56" x2="606" y2="56"/>
+        <line x1="730" y1="56" x2="750" y2="56"/>
+      </g>
+    </svg>
+    <figcaption>流程示意，非计算结果。耦合迭代未收敛时不进入接受。</figcaption>
+  </figure>
+  <ol>
+    <li><strong>读配置</strong>：JSON 写明网格尺寸、材料、边界、时间步与容差（如 <a href="../../cases/fsi1.json">cases/fsi1.json</a>）；算例参数不散落在求解器内部。</li>
+    <li><strong>双域网格</strong>：同一几何拆成流体与固体网格，界面节点一一对应；网格由外部 Gmsh 生成，方程离散和求解全部自研（<a href="../../src/fsi_ice/mesh/turek.py">mesh/turek.py</a>）。</li>
+    <li><strong>候选步</strong>：给定界面位移 x，先把固体位移调和延拓到流体网格（动网格更新），解流体，把界面载荷传给固体，解固体，得到新的界面位移 G(x)。每一步都从<strong>已接受历史</strong>出发，不修改参考网格。</li>
+    <li><strong>耦合迭代</strong>：比较 G(x) 与 x 的残差；不满足容差就按固定松弛或 Aitken 更新 x，再重复候选步（见<a href="#coupling">耦合怎么做</a>）。</li>
+    <li><strong>全场事务</strong>：一个时间步的网格、流体、固体和时间历史一并准备，全部成功才原子地接受；任何失败整体回滚，重试与冷启动逐位一致。</li>
+    <li><strong>报告</strong>：保存残差、守恒量、迭代历史、配置与运行环境；是否通过以报告中的 <code>status</code> 和检查项为准，不以"命令能运行"为准。</li>
+  </ol>
+</section>
+
+<section id="concepts">
+  <h2>几个关键概念</h2>
+
+  <h3>1. 一切归结为"残差 = 0"</h3>
+  <p>
+    每个物理模块提供残差 <code>R(状态)</code>（大致是"内部力减外部力"）及其导数（Jacobian，也称切线）。
+    线性问题里切线不随状态变化；非线性问题用牛顿法反复解 <code>J·Δx = −R</code>。
+    分区耦合和整体耦合都基于<strong>同一套残差</strong>，只是把它们组合和求解的方式不同——这保证两种方法的比较是公平的。
+  </p>
+
+  <h3>2. 候选历史与已接受历史严格分开</h3>
+  <p>
+    时间推进用固定步长 BDF1/BDF2：BDF1 是 <code>(d(n+1)−d(n))/dt</code>，
+    BDF2 是 <code>(1.5·d(n+1)−2·d(n)+0.5·d(n−1))/dt</code>。
+    耦合迭代会在同一时间步反复求解，所以"候选状态"绝不能写进"已接受历史"；
+    只有整个时间步成功后才统一接受，失败则完整回滚（<a href="../../src/fsi_ice/time/transaction.py">time/transaction.py</a>）。
+    读监测值和重试用数据都以已接受状态为准。
+  </p>
+
+  <h3>3. 动网格与几何守恒</h3>
+  <p>
+    固体变形会让流体网格跟着动。先用调和方程把界面位移延拓到整个流体网格（<a href="../../src/fsi_ice/ale/harmonic.py">ale/harmonic.py</a>），
+    得到网格位移 <code>d</code> 与当前坐标 <code>X+d</code>；变形梯度 <code>F = J(x)·J(X)⁻¹</code>，
+    要求 <code>j = det F &gt; 0</code>（单元不翻转），并设最小体积比和最小单元质量门槛，违规的候选几何被拒绝且不改变参考网格。
+    ALE 对流项使用<strong>相对速度 <code>u−w</code></strong>（w 是网格速度）。
+    有限时间步下，"位移差分得到的速度"与"使体积收支精确的扫掠通量速度"并不相等，
+    程序把它们分别命名、分别验证（离散几何守恒：<code>∇(X)·Q_BDF = g_BDF</code>，见 <a href="../../src/fsi_ice/ale/gcl.py">ale/gcl.py</a>）。
+    "只把对流速度换成 u−w"是不够的——体积收支必须用满足离散 GCL 的扫掠通量。
+  </p>
+
+  <h3>4. 界面传递必须严格对偶</h3>
+  <p>
+    界面约定：运动映射 <code>H</code> 把固体界面位移插值到流体一侧（当前为 P1 固体 → P2 流体）；
+    流体牵引 <code>t(s) = −σ(f)·n(f) = σ(f)·n(s)</code> 积分成节点力后，用 <code>Hᵀ</code> 转到固体，
+    保证离散虚功一致：<code>δdᵀ·f(s) = (H·δd)ᵀ·g(f)</code>。
+    厚度只计入一次；参考构形只匹配一次，不在变形后重新匹配；几何、力的方向与符号都有测试固定。
+  </p>
+</section>
+
+<section id="fields">
+  <h2>各模块怎么做的</h2>
+  <p>每个模块都回答同样的问题：解决什么问题、程序怎么做、怎么确认算得对、当前做到哪一步。</p>
+
+  <h3>网格与有限元基础（M0）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>把平面区域切成三角形小片，用分片简单函数近似未知量，把微分方程变成代数方程组。
+    <strong>程序怎么做：</strong><a href="../../src/fsi_ice/mesh/triangular.py">mesh/triangular.py</a> 存储点、三角形单元（逆时针）和边界标签；
+    <a href="../../src/fsi_ice/fem/p1.py">fem/p1.py</a> 提供 P1 形函数与梯度；积分用三角形求积表；单元贡献按自由度编号组装成稀疏矩阵；
+    Dirichlet 边界用分块消元处理。
+    <strong>怎么确认：</strong>形函数分片单位性与导数和、单项式积分精确性、线性场再现（patch test）、
+    Poisson 制造解三网格收敛：L2 阶 1.994、H1 半范阶 0.997（门槛 1.8 / 0.9）。
+    <strong>证据：</strong><a href="../validation/m0.md">M0 记录</a>；测试 <a href="../../tests/test_mesh.py">test_mesh.py</a>、<a href="../../tests/test_fem.py">test_fem.py</a>、<a href="../../tests/test_poisson.py">test_poisson.py</a>。
+  </p>
+
+  <h3>固体求解器（M1）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>计算弹性体在载荷下的位移与应力，从线性小变形扩展到有限变形。
+    <strong>程序怎么做：</strong>小变形线弹性 <code>σ = λ·tr(ε)·I + 2μ·ε</code>，可选平面应力/平面应变（<a href="../../src/fsi_ice/solid/linear.py">solid/linear.py</a>）；
+    有限变形采用总拉格朗日 St. Venant–Kirchhoff：<code>F = I + ∇d</code>，<code>E = ½(FᵀF − I)</code>，
+    <code>S = λ·tr(E)·I + 2μ·E</code>，<code>P = F·S</code>，配一致切线与牛顿迭代（<a href="../../src/fsi_ice/solid/stvk.py">solid/stvk.py</a>）；
+    动力学写成 <code>d' = v</code>、<code>M·v' + r(d) = f</code>，用 BDF1/BDF2 推进（<a href="../../src/fsi_ice/solid/dynamics.py">solid/dynamics.py</a>）。
+    非正 <code>det(F)</code> 直接拒绝，不静默继续。
+    <strong>怎么确认：</strong>刚体运动零内力、patch test、中心差方向导数（门槛 1e-5）；
+    CSM1/2 静力最细网格 y 位移误差 0.536% / 0.546%；
+    CSM3 动力频率误差 0.481%、振幅误差 2.10%（门槛 5% / 10%）；固体 BDF1/BDF2 时间阶 0.973 / 1.986。
+    <strong>证据：</strong><a href="../validation/single_fields.md">单场记录</a>；测试 <a href="../../tests/test_solid.py">test_solid.py</a>、<a href="../../tests/test_stvk_time.py">test_stvk_time.py</a>。
+  </p>
+
+  <h3>流体求解器（M2）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>计算不可压牛顿流体的速度与压力，从 Stokes 扩展到稳态/瞬态 Navier–Stokes。
+    <strong>程序怎么做：</strong>速度—压力采用 P2/P1 Taylor–Hood 混合元；物理压力约定 <code>σ = −p·I + 2μ·ε(u)</code>；
+    方程 <code>ρ(∂u/∂t + (u−w)·∇u) = −∇p + μΔu + f</code>、<code>∇·u = 0</code>（固定网格时 w=0）；
+    封闭边界固定一个压力自由度，自然出口不固定（<a href="../../src/fsi_ice/fluid/taylor_hood.py">fluid/taylor_hood.py</a>）。
+    瞬态线化系统用 GMRES 加 LU 预条件，并检查<strong>真实线性残差</strong>而不是只看迭代历史。
+    <strong>怎么确认：</strong>Poiseuille 流精确再现；解析 Stokes/Navier–Stokes 空间收敛速度阶 3.02、压力阶 2.13（门槛 2.7 / 1.8）；
+    CFD1/2 稳态阻力相对误差 0.482% / 0.623%，升力 0.629% / 1.394%；
+    CFD3 动态频率误差 0.488%、升力振幅误差 0.378%、阻力均值误差 0.874%（门槛 10%）；流体 BDF1/BDF2 时间阶 0.986 / 2.030。
+    <strong>证据：</strong><a href="../validation/single_fields.md">单场记录</a>；测试 <a href="../../tests/test_fluid.py">test_fluid.py</a>、<a href="../../tests/test_transient.py">test_transient.py</a>。
+  </p>
+
+  <h3>动网格 ALE（M3）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>让流体网格随固体运动而不翻转，并保证移动网格上的质量守恒。
+    <strong>程序怎么做：</strong>调和延拓（每个分量解一次 Poisson）给出网格位移（<a href="../../src/fsi_ice/ale/harmonic.py">ale/harmonic.py</a>）；
+    <a href="../../src/fsi_ice/ale/geometry.py">ale/geometry.py</a> 建立候选几何并做质量门槛检查（默认最小体积比 0.2、最小质量 0.1）；
+    网格速度由 BDF 位移求导、P2 取端点平均（<a href="../../src/fsi_ice/ale/kinematics.py">ale/kinematics.py</a>）；
+    <a href="../../src/fsi_ice/ale/gcl.py">ale/gcl.py</a> 构造满足离散 GCL 的扫掠通量；
+    <a href="../../src/fsi_ice/fluid/ale.py">fluid/ale.py</a> 提供带 ALE 上下文的残差与网格方向导数（JVP）。
+    <strong>怎么确认：</strong>仿射/常数场精确再现（≤4.4e-16）；调和解收敛 L2/H1 阶 1.98 / 0.99；
+    固定网格退化与既有实现逐位一致（≤5.6e-17）；GCL 逐单元缺陷 ≤3.0e-16；
+    ALE 制造解空间阶 3.06/3.09，时间阶 BDF1 0.91–0.95、BDF2 2.01–2.17；JVP 与中心差分对比 1.6e-12（门槛 1e-5）。
+    <strong>证据：</strong><a href="../validation/m3.md">M3 矩阵</a>（14-01…15-06）；测试 <a href="../../tests/test_ale_mesh.py">test_ale_mesh.py</a>、<a href="../../tests/test_ale_fluid.py">test_ale_fluid.py</a>。
+  </p>
+
+  <h3>界面传递（M3）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>在固体和流体之间同步传递运动（位移/速度）与力（牵引/节点力），且不发生能量凭空产生。
+    <strong>程序怎么做：</strong><a href="../../src/fsi_ice/interface/topology.py">interface/topology.py</a> 建立匹配界面并固定自由度对应关系；
+    <a href="../../src/fsi_ice/interface/mapping.py">interface/mapping.py</a> 实现运动映射 H 与对偶载荷 Hᵀ；
+    <a href="../../src/fsi_ice/interface/traction.py">interface/traction.py</a> 从流体解积分 Cauchy 牵引，含 Nanson 参考/当前构形转换与厚度一次计入；
+    还提供载荷对速度、压力、网格和固体位移的方向导数（供整体耦合 Jacobian 使用）。
+    <strong>怎么确认：</strong>恒等式（H·1=1、P2 迹=端点平均、n(s)+n(f)=0）误差 0～3.6e-15；
+    虚功一致性 1.3e-15；矩平移检查；载荷方向导数 2.7e-15～3.4e-11（门槛 1e-5）。
+    <strong>证据：</strong><a href="../validation/m3.md">M3 矩阵</a>（16-01…16-DER）；测试 <a href="../../tests/test_interface.py">test_interface.py</a>。
+  </p>
+
+  <h3>时间推进与全场事务（M3）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    <strong>解决什么问题：</strong>管理 BDF 历史与整个时间步的候选/接受/回滚，保证失败重试与"从未出错"的基线一致。
+    <strong>程序怎么做：</strong><a href="../../src/fsi_ice/time/bdf.py">time/bdf.py</a> 提供只读 BDF 模板与历史；
+    <a href="../../src/fsi_ice/time/transaction.py">time/transaction.py</a> 实现两步事务：先在私有副本上完成所有可能失败的操作（prepare），
+    全部成功后才一次性替换（publish）；任何失败都不留部分状态。
+    <strong>怎么确认：</strong>故障注入覆盖几何翻转、固体牛顿失败、流体奇异矩阵、末端校验失败、序列化失败、
+    重复评估、连续失败后重试等 10 类场景；失败后所有场与历史的数组逐位不变；加域重试与冷启动逐位一致。
+    <strong>证据：</strong><a href="../validation/m3.md">M3 矩阵</a>（17-01…17-RETRY，61 项事务测试）；测试 <a href="../../tests/test_transaction.py">test_transaction.py</a>。
+  </p>
+</section>
+
+<section id="coupling">
+  <h2>耦合怎么做</h2>
+  <p>
+    <strong>分区耦合（已完成，M4）。</strong>最直觉的 FSI 做法是"流体和固体轮流解"：
+    给一个界面位移 x，解流体得到载荷，传给固体，解固体得到新的界面位移 G(x)；
+    x 几乎不变时说明两边都满意了。这就是 Dirichlet–Neumann 迭代。
+    为了稳定，更新时加<strong>松弛</strong>：
+  </p>
+  <pre>x(k+1) = x(k) + ω·( G(x(k)) − x(k) )</pre>
+  <ul>
+    <li><strong>固定松弛</strong>：ω 取常数（默认 0.5），简单但可能需要很多次迭代。</li>
+    <li><strong>Aitken 自适应</strong>：根据上一步残差自动调整 ω，公式为
+      <code>ω(k) = −ω(k−1)·(r(k−1)·(r(k)−r(k−1))) / ||r(k)−r(k−1)||²</code>，
+      并限制在 [0.05, 1] 内；分母退化时保留上一步系数并记录原因。</li>
+  </ul>
+  <p>
+    收敛判据是<strong>未松弛的界面残差</strong>按显式物理尺度归一化后小于容差：
+    <code>||G(x)−x||/scales ≤ atol + rtol·max(||x||/scales, ||G(x)||/scales)</code>。
+    尺度必须由调用者显式给出，避免不同单位的量直接比较；收敛的结果保留"最后评估的输入与对应单场状态"，
+    不把 x 静默替换成 G(x)。失败（不收敛、单场抛错）返回带完整历史的终止异常，绝不返回假成功。
+  </p>
+  <p>
+    <strong>怎么确认：</strong>先用一个小型真实有限元问题（固定参考几何、BDF1 一步）
+    把分区迭代的解与"同一离散方程的块直接解"比较：位移差 3.41e-13、速度差 6.76e-12、压力差 4.16e-12（门槛 1e-8）；
+    同一问题固定松弛需 27 次评估，Aitken 用 7 次（仅作记录，不作为普遍加速承诺）。
+    然后在正式 FSI1 稳态基准上验收：
+  </p>
+  <table>
+    <thead><tr><th>FSI1（Turek–Hron 稳态）</th><th>参考值（FeatFlow level 7+0）</th><th>最细网格实测</th><th>误差</th></tr></thead>
+    <tbody>
+      <tr><td>梁尖 x 位移 ux(A)</td><td>2.270493e-5 m</td><td>2.24104e-5 m</td><td>绝对 2.95e-7 m（门槛 1e-5）</td></tr>
+      <tr><td>梁尖 y 位移 uy(A)</td><td>8.208773e-4 m</td><td>7.87416e-4 m</td><td>4.076%（门槛 5%）</td></tr>
+      <tr><td>阻力</td><td>14.29426 N/m</td><td>14.2380 N/m</td><td>0.394%（门槛 5%）</td></tr>
+      <tr><td>升力</td><td>0.763746 N/m</td><td>0.777320 N/m</td><td>绝对 0.01357 N/m（门槛 0.1）</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">
+    三档网格（h=0.02 / 0.01 / 0.0075 m）误差逐级下降；y 位移从 31.7% → 5.45% → 4.08%。
+    第一次正式运行最细网格为 5.449%，报告为 FAIL——修正方式是继续加密网格（新增 h=0.0075），
+    而不是放宽门槛；这也是本项目验证纪律的例子。
+  </p>
+  <p>
+    <strong>整体耦合（计划，M5）：</strong>把所有场的未知量放进同一个非线性方程组，用包含界面与网格依赖的完整 Jacobian 做牛顿迭代。
+    它与分区耦合共享同一套残差与物理模型，验收标准是在相同离散下两种方法收紧容差后得到一致解。
+  </p>
+  <p>
+    <strong>证据：</strong><a href="../development/t18_plan.md">T18 计划</a>、<a href="../validation/t18.md">T18 记录</a>、
+    <a href="../validation/t19.md">T19 Aitken 验收</a>、<a href="../development/fsi1_plan.md">FSI1 计划</a>、<a href="../validation/t20.md">T20 验收</a>；
+    代码 <a href="../../src/fsi_ice/coupling/partitioned.py">coupling/partitioned.py</a>；
+    测试 <a href="../../tests/test_partitioned.py">test_partitioned.py</a>、<a href="../../tests/test_aitken.py">test_aitken.py</a>、<a href="../../tests/test_fsi1.py">test_fsi1.py</a>。
+  </p>
+</section>
+
+<section id="trust">
+  <h2>怎么判断算得对</h2>
+  <p>本项目不靠"图看着对"或"程序没报错"判定正确性，而靠事先写好门槛的可重复数值证据：</p>
+  <ul>
+    <li><strong>门槛先于实现</strong>：误差、守恒与收敛门槛写在算例配置和 <a href="../../spec.md">spec.md</a> 中，不允许为让失败的测试通过而临时放宽。</li>
+    <li><strong>构造已知答案</strong>：patch test（精确复现线性场）、制造解 MMS（已知解析解 + 预期收敛阶）、Poiseuille 流等解析算例。</li>
+    <li><strong>导数与残差一致</strong>：解析切线/JVP 与中心差分对照，误差趋势随扰动减小而下降；报告真实残差，不用求解器内部数字代替。</li>
+    <li><strong>守恒与对偶</strong>：质量收支、几何守恒（GCL）、界面虚功/功率、总力与总矩、作用力反作用力。</li>
+    <li><strong>与公开参考比较</strong>：CSM/CFD/FSI1 数值对照 Turek–Hron 基准与 FeatFlow 官方结果，使用核验过的来源与单位。</li>
+    <li><strong>重复性与失败注入</strong>：重复运行逐位一致；人为制造失败验证回滚与重试等价于冷启动；失败不保留旧 PASS。</li>
+    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行全部测试（当前 432 项），相关领域另跑专项回归。</li>
+  </ul>
+  <p>
+    每项功能的验证日期、命令、环境、参数、预期标准、实测结果与结论记录在
+    <a href="../validation/m0.md">docs/validation/</a> 下的专门文档中；机器可读的门槛见 <a href="../../cases/">cases/</a>。
+    未实测的功能保持"计划"状态——存在测试文件不等于测试已通过。
+  </p>
+</section>
+
+<section id="run">
+  <h2>工具链与运行</h2>
+  <p>
+    环境为项目内 <code>.venv</code>（Python 3.12 + NumPy/SciPy/Matplotlib/pytest，版本锁定于
+    <a href="../../requirements.txt">requirements.txt</a>；重建说明见 <a href="../environment.md">环境记录</a>）。
+    常用命令（在项目根目录）：
+  </p>
+  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（当前 432 项）
+.venv/bin/python -m fsi_ice poisson    --config cases/poisson_sine.json --output results/poisson
+.venv/bin/python -m fsi_ice single-fields --config cases/single_fields.json --output results/single_fields
+.venv/bin/python -m fsi_ice partitioned-check --config cases/partitioned_check.json --output results/t18/check
+.venv/bin/python -m fsi_ice fsi1       --config cases/fsi1.json --output results/t20/fsi1</pre>
+  <p>
+    <code>csm3</code>、<code>cfd3</code> 为动态基准（三套网格、三个步长，耗时较长），支持
+    <code>--postprocess-only</code> 从已保存监测数据重新汇总；CFD 基准网格生成需要外部 <strong>Gmsh CLI</strong>（本机 4.12），
+    没有 Gmsh 时其余算例仍可运行。完整命令与输出说明见 <a href="../../README.md">README</a>；
+    算例参数见 <a href="../../cases/">cases/</a>。
+  </p>
+  <p class="muted">
+    数值结果解释：测试通过 ≠ 物理精度已验证。验收是否通过以各算例 <code>report.json</code> 的
+    <code>status</code>/<code>checks</code> 和 <a href="../validation/">验证记录</a>为准。
+  </p>
+</section>
+
+<section id="record">
+  <h2>更新记录</h2>
+  <table>
+    <thead><tr><th>日期</th><th>章节</th><th>变化</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>2026-10-11</td>
+        <td>全部</td>
+        <td>初版：补记已完成的 M0–M4（数值基础、固体、流体、ALE/界面、事务、分区耦合与稳态 FSI1），
+            说明流程、关键概念、验证方式与运行入口</td>
+        <td>各验证记录 <a href="../validation/m0.md">m0.md</a>、<a href="../validation/single_fields.md">single_fields.md</a>、
+            <a href="../validation/m3.md">m3.md</a>、<a href="../validation/t18.md">t18.md</a>、<a href="../validation/t19.md">t19.md</a>、
+            <a href="../validation/t20.md">t20.md</a>；全量回归 432 项通过（本地实际运行，123.44 s）；
+            本次修改另做了 HTML 结构、导航锚点和本地链接检查</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+
+<footer>
+  本页为静态文档，不参与求解器的构建、运行、配置解析或测试判定。
+  维护约定见 <a href="维护说明.md">维护说明.md</a>。
+</footer>
+
+</body>
+</html>

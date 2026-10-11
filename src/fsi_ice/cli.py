@@ -13,6 +13,10 @@ def main(argv=None):
     poisson.add_argument("--config", type=Path, help="JSON case configuration; default uses levels 8,16,32")
     poisson.add_argument("--output", type=Path, default=Path("results/poisson"))
     poisson.add_argument("--no-plot", action="store_true")
+    partitioned = subparsers.add_parser("partitioned-check", help="Validate partitioned coupling against a linear FE direct solve")
+    partitioned.add_argument("--config", type=Path, required=True)
+    partitioned.add_argument("--output", type=Path, default=Path("results/partitioned_check"))
+    partitioned.add_argument("--method", choices=("fixed", "aitken"), help="Override the method stored in the configuration")
     for command in ("solid", "fluid", "single-fields", "csm3", "cfd3"):
         validation = subparsers.add_parser(command, help="Run single-field verification and benchmarks")
         validation.add_argument("--config", type=Path, required=True)
@@ -24,6 +28,11 @@ def main(argv=None):
     subparsers.add_parser("test", help="Run the development test suite from any working directory")
     args = parser.parse_args(argv)
     try:
+        if args.command == "partitioned-check":
+            from fsi_ice.validation.partitioned import run_partitioned_check_cli
+            report = run_partitioned_check_cli(args.config, args.output, method=args.method)
+            print(f"{report['status']}: report saved to {args.output.resolve() / 'report.json'}")
+            return 0 if report["status"] == "PASS" else 1
         if args.command in ("csm3", "cfd3"):
             from fsi_ice.validation.transient import load_transient_config, run_transient
             config = load_transient_config(args.config)

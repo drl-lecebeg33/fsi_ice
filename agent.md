@@ -2,7 +2,7 @@
 
 本文件定义角色职责、任务依赖和交付流程。项目范围及验收标准以 [spec.md](spec.md) 为准，阶段进度记录在 [gola.md](gola.md)，所有执行者遵守 [AGENTS.md](AGENTS.md)。
 
-当前安排：固体、流体单场验证已完成。T00–T12 已验收；T13 已核验本轮 CSM/CFD 参数。2026-10-11 按用户要求启用 Orca `orchestration` 并行任务编排，先完成 M3 开发设计与证据复核，分工见第 8 节。T14–T17 的功能实现尚未开始。此前单场功能由同一执行者实现、运行和自查；本轮多个执行者的设计与复核不追溯替代此前验证。
+当前安排：M0–M3、M4/T18 和 T19/Aitken 已完成本地验收。T20 已完成 FSI1 来源配置及正式双域 Gmsh 生成/导入入口；当前全量回归 428 项通过。下一任务为正式 FSI1 稳态流固耦合求解、参考量与网格趋势验证；范围和已完成证据见 [FSI1 计划](docs/development/fsi1_plan.md)。
 
 ## 1. 角色与负责范围
 
@@ -194,7 +194,7 @@ M0/M1、P2/P1 Stokes/Navier–Stokes、BDF 时间历史和制造解验证已通�
 
 本轮三个设计任务均通过 `worker_done` 成功交付，任务标识分别为 A4a `task_ce2e60baf775`、A4b `task_ca71575228d2`、A7 `task_811ea7f050a9`。协调者已处理全部交付消息及终端归属：A4b/A7 终端释放并归档；A4a 终端由 Orca 标记为用户接管，保留给用户。没有正在等待的本轮设计任务。所有功能实现仍保持未开始，未提交或上传。
 
-### 8.1 第一波实现派发（2026-10-11，进行中）
+### 8.1 第一波实现派发（2026-10-11，已完成）
 
 接口冻结见 [M3 第一波接口冻结](docs/development/m3_freeze.md)；A0 据此派发第一波实现任务（Orca Run `run_ba6b6769f033`，三个 opencode 执行者，同一工作区，不提交、不上传）：
 
@@ -230,4 +230,24 @@ A7 证据汇总验收：实际运行全量回归（285 passed，121.25 s）与 7
 
 **本轮结论**：M3 完成——ALE、界面与全场事务全部实现并验证，[gola.md](gola.md) 已勾选 M3 五项并更新状态，[spec.md](spec.md) 状态行同步。下一步为 M4（分区耦合与 FSI1），尚未开始；所有工作仍未提交/推送，上传须经用户指示并按 AGENTS.md 完成本地验证。
 
-A0 同轮已提供公共时间模板：`BDFStencil`、`BDFHistory.stencil()` 与 `BDFContext.stencil`，新增 `tests/test_time.py` 6 项检查，全量回归 99 项通过。T15/T17 保持未开始；M3 完成勾选等待真实实现与验收证据。
+A0 早期提供公共时间模板：`BDFStencil`、`BDFHistory.stencil()` 与 `BDFContext.stencil`，新增 `tests/test_time.py` 6 项检查，当时全量回归 99 项通过。后续 T15/T17 已完成，最终 M3 结论见本节验收汇总。
+
+## 9. T18 固定松弛分区耦合（2026-10-11，完成）
+
+用户要求继续推进下一步工作；本轮单一执行者承担 A5 实现和 A0 集成自查，没有派发并行任务或声称独立复核。前置 T17 已验收；文件范围、输入输出、范数、容差和参考直接解事先记录于 [T18 计划](docs/development/t18_plan.md)。
+
+- 实现 `coupling/partitioned.py`：Dirichlet–Neumann 顺序回调、固定松弛、逐分量尺度、未松弛残差收敛、最后评估状态返回、分阶段失败异常及历史记录；控制器不接受时间历史。
+- 新增固定参考几何上的线性 BDF1 有限元耦合验证，复用 Stokes、弹性、质量矩阵、Cauchy 应力、H/Hᵀ 和载荷 JVP；统一入口为 `python -m fsi_ice partitioned-check`。
+- 冻结配置 ω=0.5 下 27 次评估收敛；分区/直接解位移、速度、压力和载荷的归一化差均 <7e-12；组合方程残差 7.102e-12，连续性 2.486e-18；重复解及已接受 BDF 历史完全一致。
+- 相关回归 60 项通过（4.53 s），最终全量回归 338 项通过（113.98 s）；Python 3.12.3，全部用项目 `.venv`。失败注入、失败重试、异常输入及 CLI 返回码已实际覆盖。
+- README、gola.md、spec.md 已同步；详细命令、门槛、日志和数值见 [T18 验证记录](docs/validation/t18.md)。M0–M3 基线提交 `2b5f713` 已推送，本轮 T18 变更尚未提交或推送。
+
+T18 完成；T19/Aitken 是下一个工作包，T20/正式 FSI1 保持未开始。本轮线性小型验证不作为完整 FSI1、整体 Newton 或瞬态 FSI 验收。
+
+## 10. M4 并行推进（2026-10-11，进行中）
+
+按用户要求使用 `orchestration` 技能，实际 Run `run_13e46e07bd4f`，三名 Codex 执行者分别承担 T19 实现、FSI1 原始参考与网格方案、分区耦合独立复核。文件独占、Task/Dispatch 标识、公共接口和后续依赖见 [M4 并行计划](docs/development/m4_parallel_plan.md)。协调者负责公共入口和数值比较集成；T19 与正式 FSI1 的完成勾选继续等待实际本地验证证据。本轮不提交或推送。
+
+2026-10-11 修复轮：A7 复核登记的 D1（CLI 输入失败残留旧成功产物）与 D2（setup/metrics/写出不在失败记录范围内）由协调者（A0）修复并自查。`partitioned-check` CLI 入口先清理输出再读取、解析、校验配置，输入失败也保存 `failure.json`（保留 `config_path`，`config` 与 `histories_unchanged` 为 `null`）；`run_partitioned_check` 的失败记录覆盖 setup、metrics 与输出写出，无法评估历史时不伪造布尔值。A7 独立测试中 6 项 strict xfail（D1×4、D2×2）已转为正常断言并实际通过；相关回归 85 项、工作区全量回归 425 项通过（Python 3.12.3，项目 `.venv`）。证据见 [D1/D2 修复记录](docs/validation/t18_fixes.md) 与 `results/t19/fix_d1d2/`。该修复为修复者自查，不代替 A7 独立复核；T19 独立验收与 T20 保持待办。
+
+另一并行工作包（T13-FSI1 参考与 T20 准备）当前在 `results/t20/reference/` 留有原始参考页面存档与三套共享几何匹配网格原型（尺寸 0.01/0.005/0.0025，拓扑、坐标与合成映射恒等式检查通过，状态 `passed_prototype_only`），但计划交付的 `docs/development/fsi1_plan.md` 与 `cases/fsi1_reference.json` 在本轮检查时尚未落地；临时网格原型不等于正式 FSI1 或 T20 验收。

@@ -1,6 +1,6 @@
 # fsi_ice
 
-基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。已实现并验证数值基础、线弹性/StVK 固体、Stokes/Navier–Stokes 流体和 BDF 时间推进，CSM1/2/3 与 CFD1/2/3 单场验收已通过。本轮按用户要求停在单场验证与结果评估，完整 FSI 尚未实现。
+基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M3 已完成：数值基础、线弹性/StVK 固体、Stokes/Navier–Stokes 流体、BDF 时间推进、ALE、界面传递和全场事务均有本地验证证据。M4 已完成 T18 固定松弛和 T19 Aitken 分区算法验证；T20/正式 FSI1 稳态求解仍在开发。
 
 ## 项目文档
 
@@ -11,6 +11,13 @@
 - [Python 环境与验证记录](docs/environment.md)
 - [M0 数值基础验收记录](docs/validation/m0.md)
 - [固体与流体单场验证](docs/validation/single_fields.md)
+- [M3 ALE、界面与全场事务验收](docs/validation/m3.md)
+- [T18 固定松弛设计与验收约定](docs/development/t18_plan.md)
+- [T18 本地验证记录](docs/validation/t18.md)
+- [T19 Aitken 验收记录](docs/validation/t19.md)
+- [T20 FSI1 稳态基准计划](docs/development/fsi1_plan.md)
+
+T20 已提供正式 FSI1 双域网格入口：`fsi_ice.mesh.fsi1_mesh` 生成共享几何，`read_fsi_gmsh2` 从同一 MSH2 文件拆分流体/固体网格并保留共享全局节点映射。当前验收覆盖网格标签、方向、质量、P2/P1 界面匹配及三档原型复读；稳态流固耦合解仍待实现。
 
 ## 本地环境
 
@@ -49,7 +56,7 @@
 
 包安装后，`python -m fsi_ice` 或控制台命令 `fsi-ice` 均可从其他目录运行；此时配置和输出路径按当前工作目录解释。`test` 为开发入口，需要保留本地项目及测试目录。
 
-当前回归：93 项测试通过。M0 阶段原有 44 项，Poisson 最后一次加密的 L2 收敛阶约 1.994、H1 半范阶约 0.997；历史证据见 [M0 记录](docs/validation/m0.md)，新增单场证据见下文。
+最新全量回归 **428 项通过**；包含 T18/T19 分区耦合及 T20 新增 FSI1 网格入口检查。T18 当时为 338 项，M3 冻结状态为 285 项；历史证据见 [M0 记录](docs/validation/m0.md)、[T19 验收](docs/validation/t19.md) 和 [T20 计划](docs/development/fsi1_plan.md)。
 
 ## 固体与流体验证
 
@@ -78,3 +85,16 @@ CSM3/CFD3 最终细化结果均为 PASS，证据见 [单场验证记录](docs/va
 CFD 基准网格生成使用外部 **Gmsh CLI**（本机 4.12）；无 Gmsh 时 Poisson、矩形解析算例和固体网格仍可运行。未使用现成 FEM/流体/固体求解器。单线程设置用于控制本机 BLAS 线程开销，数学离散相同。
 
 代码功能必须在本地运行、测试通过且没有错误后，才能上传到 GitHub。
+
+## 固定松弛分区耦合验证
+
+运行 T18 小型有限元验证：
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m fsi_ice partitioned-check \
+  --config cases/partitioned_check.json --output results/t18/check
+```
+
+验证使用固定参考几何上的 BDF1 单步、非定常 Stokes 和线弹性动力学，比较分区解与相同离散方程的块直接解。保存 `report.json`、`iterations.csv` 和 `solution.npz`；配置读取、解析或校验失败以及求解或写出失败都会清除旧报告和旧解并保存 `failure.json`（输入失败保留配置路径与故障阶段，不声称已加载无效配置）。正式 FSI1 将在 T19/Aitken 及 T20 完成后独立验收。
+
+`fsi_ice.coupling` 提供 `DirichletNeumannMap` 和 `solve_dirichlet_neumann`：依次调用流体求解、载荷传递、固体求解及界面提取回调，逐分量尺度必须显式提供。以未松弛界面残差判定收敛；收敛结果保留最后评估的输入与对应单场状态。回调应检查物理残差并在失败时抛出异常，且始终使用同一步已接受历史；成功后的统一时间接受由外层全场事务负责。接口、尺度和退出条件见 T18 计划。

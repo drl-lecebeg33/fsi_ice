@@ -1,6 +1,6 @@
 # fsi_ice 开发规格
 
-状态：第一版开发基线。M0–M3 已完成：单场（CSM1/2/3、CFD1/2/3、制造解空间/时间收敛）与 ALE、界面传递、全场事务均已实现并本地验证（冻结状态回归 285 项通过）。证据见 [M0](docs/validation/m0.md)、[单场验证](docs/validation/single_fields.md) 和 [M3 验收矩阵](docs/validation/m3.md)。完整 FSI 尚未实现。
+状态：第一版开发基线。M0–M3 已完成：单场（CSM1/2/3、CFD1/2/3、制造解空间/时间收敛）与 ALE、界面传递、全场事务均已实现并本地验证（M3 冻结状态回归 285 项通过）。M4/T18 固定松弛与 T19 Aitken 分区控制器已实现；T20 已完成 FSI1 来源配置和正式双域网格入口，当前全量回归 428 项通过。证据见 [M0](docs/validation/m0.md)、[单场验证](docs/validation/single_fields.md)、[M3 验收矩阵](docs/validation/m3.md)、[T18 修复记录](docs/validation/t18_fixes.md)、[T19 验收](docs/validation/t19.md) 和 [FSI1 计划](docs/development/fsi1_plan.md)。正式 FSI1 稳态解与 FSI2 尚未实现。
 
 ## 1. 项目目标
 

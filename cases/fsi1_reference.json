@@ -1,0 +1,59 @@
+{
+  "case": "fsi1_reference",
+  "status": "reference_only_not_solved",
+  "provenance": {
+    "definitions_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+    "tests_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+    "reference_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_reference.html",
+    "archived_snapshot_manifest": "../results/t20/reference/access_manifest.json",
+    "verified_on": "2026-10-11"
+  },
+  "geometry_m": {
+    "channel_length": 2.5,
+    "channel_height": 0.41,
+    "cylinder_center": [0.2, 0.2],
+    "cylinder_radius": 0.05,
+    "beam_length": 0.35,
+    "beam_thickness": 0.02,
+    "beam_lower_right_corner": [0.6, 0.19],
+    "tip_point_A_at_reference": [0.6, 0.2],
+    "force_reference_point_B": [0.15, 0.2]
+  },
+  "fluid": {
+    "model": "incompressible_newtonian",
+    "density_kg_m3": 1000.0,
+    "kinematic_viscosity_m2_s": 0.001,
+    "dynamic_viscosity_Pa_s": 1.0,
+    "mean_inflow_velocity_m_s": 0.2,
+    "inflow_profile": "u_x(0,y)=1.5*Ubar*y*(H-y)/(H/2)^2; u_y=0",
+    "reynolds_number": 20.0,
+    "outlet": "stress_free_or_do_nothing; pressure reference is zero mean",
+    "no_slip": ["top_wall", "bottom_wall", "cylinder", "fluid_structure_interface"]
+  },
+  "solid": {
+    "model": "St_Venant_Kirchhoff",
+    "density_kg_m3": 1000.0,
+    "poisson_ratio": 0.4,
+    "shear_modulus_Pa": 500000.0,
+    "young_modulus_Pa_derived": 1400000.0,
+    "clamp": "beam left end attached to fixed cylinder"
+  },
+  "benchmark_reference": {
+    "solution_type": "steady_state",
+    "source_mesh_levels": ["2+0", "3+0", "4+0", "5+0", "6+0", "7+0"],
+    "level_5_plus_0": {
+      "elements": 63488,
+      "degrees_of_freedom": 1211392,
+      "tip_displacement_x_m": 2.271553e-5,
+      "tip_displacement_y_m": 8.208126e-4,
+      "drag_N_per_unit_depth": 14.29486,
+      "lift_N_per_unit_depth": 0.7636992
+    },
+    "reported_quantity": "steady tip displacement at A and drag/lift on cylinder plus beam; force contour follows source quantity definition"
+  },
+  "source_discrepancies": [
+    "Definitions prose gives pressure point B=(0.15,0.2) m, while its geometry table lists B=(0.2,0.2) m; keep both source readings and resolve before implementing pressure-difference output."
+  ],
+  "prototype_mesh_sizes_m": [0.01, 0.005, 0.0025],
+  "implementation_status": "No FSI equations solved; values are source data and reference targets only."
+}

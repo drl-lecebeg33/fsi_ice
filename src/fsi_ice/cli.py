@@ -17,6 +17,9 @@ def main(argv=None):
     partitioned.add_argument("--config", type=Path, required=True)
     partitioned.add_argument("--output", type=Path, default=Path("results/partitioned_check"))
     partitioned.add_argument("--method", choices=("fixed", "aitken"), help="Override the method stored in the configuration")
+    fsi1 = subparsers.add_parser("fsi1", help="Run the steady partitioned Turek-Hron FSI1 benchmark")
+    fsi1.add_argument("--config", type=Path, required=True)
+    fsi1.add_argument("--output", type=Path, default=Path("results/fsi1"))
     for command in ("solid", "fluid", "single-fields", "csm3", "cfd3"):
         validation = subparsers.add_parser(command, help="Run single-field verification and benchmarks")
         validation.add_argument("--config", type=Path, required=True)
@@ -28,6 +31,11 @@ def main(argv=None):
     subparsers.add_parser("test", help="Run the development test suite from any working directory")
     args = parser.parse_args(argv)
     try:
+        if args.command == "fsi1":
+            from fsi_ice.validation.fsi1 import run_fsi1_cli
+            report = run_fsi1_cli(args.config, args.output)
+            print(f"{report['status']}: report saved to {args.output.resolve() / 'report.json'}")
+            return 0 if report["status"] == "PASS" else 1
         if args.command == "partitioned-check":
             from fsi_ice.validation.partitioned import run_partitioned_check_cli
             report = run_partitioned_check_cli(args.config, args.output, method=args.method)

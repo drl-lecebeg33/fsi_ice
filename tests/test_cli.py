@@ -53,7 +53,7 @@ def test_malformed_config_is_rejected(tmp_path):
 def test_console_entry_point_exists():
     executable = Path(sys.executable).parent / "fsi-ice"
     result = subprocess.run([str(executable), "--help"], capture_output=True, text=True, check=False)
-    assert result.returncode == 0 and "poisson" in result.stdout
+    assert result.returncode == 0 and "poisson" in result.stdout and "fsi1" in result.stdout
 
 
 def test_postprocess_requires_saved_complete_evidence(tmp_path):

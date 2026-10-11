@@ -1,0 +1,24 @@
+{
+  "case": "fsi1",
+  "mesh_sizes": [0.02, 0.01, 0.0075],
+  "fluid": {"density": 1000.0, "dynamic_viscosity": 1.0, "mean_velocity": 0.2},
+  "solid": {"density": 1000.0, "poisson": 0.4, "young": 1400000.0, "thickness": 1.0},
+  "coupling": {
+    "method": "aitken", "relaxation": 0.5, "minimum_relaxation": 0.05,
+    "maximum_relaxation": 1.0, "aitken_denominator_tolerance": 1e-14,
+    "absolute_tolerance": 1e-6, "relative_tolerance": 1e-5,
+    "max_iterations": 40, "case_name": "FSI1-steady"
+  },
+  "solver": {
+    "fluid_tolerance": 1e-8, "fluid_max_iterations": 40,
+    "solid_tolerance": 1e-9, "solid_max_iterations": 40, "solid_load_steps": 4
+  },
+  "reference": {"tip_x": 2.270493e-5, "tip_y": 8.208773e-4, "drag": 14.29426, "lift": 0.763746},
+  "acceptance": {
+    "tip_y_relative_error_max": 0.05, "drag_relative_error_max": 0.05,
+    "tip_x_absolute_error_max": 1e-5, "lift_absolute_error_max": 0.1,
+    "continuity_max": 1e-10, "mass_balance_max": 1e-10,
+    "single_field_residual_max": 1e-8, "interface_residual_max": 1e-5,
+    "minimum_mesh_quality": 0.1
+  }
+}

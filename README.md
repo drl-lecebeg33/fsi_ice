@@ -1,6 +1,6 @@
 # fsi_ice
 
-基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M3 已完成：数值基础、线弹性/StVK 固体、Stokes/Navier–Stokes 流体、BDF 时间推进、ALE、界面传递和全场事务均有本地验证证据。M4 已完成 T18 固定松弛和 T19 Aitken 分区算法验证；T20/正式 FSI1 稳态求解仍在开发。
+基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M4 已完成：数值基础、单场、ALE、界面、事务、固定/Aitken 分区算法及稳态 FSI1 均有本地验证证据。当前停在 M5 整体耦合入口；FSI2 尚未实现。
 
 ## 项目文档
 
@@ -16,8 +16,15 @@
 - [T18 本地验证记录](docs/validation/t18.md)
 - [T19 Aitken 验收记录](docs/validation/t19.md)
 - [T20 FSI1 稳态基准计划](docs/development/fsi1_plan.md)
+- [T20 FSI1 稳态验收记录](docs/validation/t20.md)
 
-T20 已提供正式 FSI1 双域网格入口：`fsi_ice.mesh.fsi1_mesh` 生成共享几何，`read_fsi_gmsh2` 从同一 MSH2 文件拆分流体/固体网格并保留共享全局节点映射。当前验收覆盖网格标签、方向、质量、P2/P1 界面匹配及三档原型复读；稳态流固耦合解仍待实现。
+T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足 5% 门槛；完整场、迭代和失败证据可由配置重复生成。
+
+运行 FSI1：
+
+```bash
+.venv/bin/python -m fsi_ice fsi1 --config cases/fsi1.json --output results/t20/fsi1
+```
 
 ## 本地环境
 
@@ -56,7 +63,7 @@ T20 已提供正式 FSI1 双域网格入口：`fsi_ice.mesh.fsi1_mesh` 生成共
 
 包安装后，`python -m fsi_ice` 或控制台命令 `fsi-ice` 均可从其他目录运行；此时配置和输出路径按当前工作目录解释。`test` 为开发入口，需要保留本地项目及测试目录。
 
-最新全量回归 **428 项通过**；包含 T18/T19 分区耦合及 T20 新增 FSI1 网格入口检查。T18 当时为 338 项，M3 冻结状态为 285 项；历史证据见 [M0 记录](docs/validation/m0.md)、[T19 验收](docs/validation/t19.md) 和 [T20 计划](docs/development/fsi1_plan.md)。
+最新全量回归 **432 项通过**；包含 T18/T19 分区耦合及 T20 FSI1 网格、稳态求解、重复性和失败处理检查。历史证据见 [M0 记录](docs/validation/m0.md)、[T19 验收](docs/validation/t19.md) 和 [T20 验收](docs/validation/t20.md)。
 
 ## 固体与流体验证
 

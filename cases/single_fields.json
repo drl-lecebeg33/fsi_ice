@@ -1,0 +1,19 @@
+{
+  "case": "single_fields",
+  "beam_meshes": [[40, 4], [80, 8], [160, 16]],
+  "csm_meshes": [[140, 8], [280, 16], [560, 32]],
+  "fluid_meshes": [0.02, 0.01, 0.005],
+  "manufactured_meshes": [4, 8, 16],
+  "time_steps": [0.1, 0.05, 0.025],
+  "acceptance": {
+    "beam_relative_error_max": 0.05,
+    "csm_relative_error_max": 0.05,
+    "cfd_relative_error_max": 0.05,
+    "velocity_order_min": 2.7,
+    "pressure_order_min": 1.8,
+    "bdf1_order_min": 0.9,
+    "bdf2_order_min": 1.8,
+    "residual_max": 1e-8,
+    "mass_error_max": 1e-10
+  }
+}

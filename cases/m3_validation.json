@@ -1,0 +1,876 @@
+{
+  "case": "m3_validation",
+  "version": "m3-verified-2026-10-11-a7-r2",
+  "date": "2026-10-11",
+  "status": "passed",
+  "verification": {
+    "executed_by": "A7",
+    "date_time": "2026-10-11 +08:00（日志写就时间 13:59–14:02）",
+    "code_state": {
+      "git_head": "dd6232b829c976a0307135200138ced8c00fbc00",
+      "worktree": "modified（M .gitignore、M README.md；未跟踪 agent.md、gola.md、cases/、docs/、scripts/、src/、tests/ 等）"
+    },
+    "environment": {
+      "python": "3.12.3",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "matplotlib": "3.11.2",
+      "pytest": "9.1.1",
+      "thread_prefix": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1"
+    },
+    "full_suite": {
+      "command": ".venv/bin/python -m fsi_ice test",
+      "exit_code": 0,
+      "result": "285 passed",
+      "duration_s": 121.25,
+      "log": "results/m3/logs/full_suite.log"
+    },
+    "domain_runs": [
+      {"command": ".venv/bin/python -m pytest tests/test_time.py", "exit_code": 0, "result": "6 passed", "pytest_duration_s": 0.06, "log": "results/m3/logs/test_time.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_ale_mesh.py", "exit_code": 0, "result": "34 passed", "pytest_duration_s": 0.95, "log": "results/m3/logs/test_ale_mesh.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_ale_fluid.py", "exit_code": 0, "result": "38 passed", "pytest_duration_s": 107.14, "log": "results/m3/logs/test_ale_fluid.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_interface.py", "exit_code": 0, "result": "53 passed", "pytest_duration_s": 1.39, "log": "results/m3/logs/test_interface.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_transaction.py", "exit_code": 0, "result": "61 passed", "pytest_duration_s": 6.83, "log": "results/m3/logs/test_transaction.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_stvk_time.py", "exit_code": 0, "result": "6 passed", "pytest_duration_s": 0.2, "log": "results/m3/logs/test_stvk_time.log"},
+      {"command": ".venv/bin/python -m pytest tests/test_single_fields.py", "exit_code": 0, "result": "10 passed", "pytest_duration_s": 2.2, "log": "results/m3/logs/test_single_fields.log"}
+    ],
+    "item_status": {"passed": 41, "not_executed": 0, "failed": 0},
+    "evidence": "docs/validation/m3.md 的“证据”列逐条给出测试文件::测试函数名、日志路径与关键实测数值（取自 agent.md §8.1 验收段或测试内断言门槛）；无逐项数值处写“阈值 + 测试名 + 日志”。",
+    "notes": [
+      "全部 41 个条目均有对应测试且本轮实际运行通过；未发现无覆盖条目。",
+      "计划文件列出的 tests/test_solid_transaction.py 本波未创建；T17 回滚覆盖实际在 tests/test_transaction.py（17-01…17-10）。",
+      "A7 未修改任何代码、测试与设计/冻结文档；门槛数值与冻结时一致。"
+    ]
+  },
+  "source_documents": [
+    "docs/development/m3_freeze.md（A0 冻结裁决；与其它文档冲突时以此为准）",
+    "docs/development/ale_plan.md（T14/T15，第 6 节）",
+    "docs/development/interface_plan.md（T16，第 9 节）",
+    "docs/development/validation_plan.md（T17 与测试矩阵 14-01…17-10，第 4–5 节）",
+    "spec.md 第 5 节（项目验收标准，仅作背景与追溯）"
+  ],
+  "notes": [
+    "本文件冻结机器可读的数值门槛与验收矩阵；thresholds 与冻结时一致，41 个条目 status 已由 A7 于 2026-10-11 按实际运行结果更新为 passed，运行记录见 verification 段与 docs/validation/m3.md。",
+    "取值规则：与 docs/development/m3_freeze.md 冲突时以冻结文档为准；三份计划之间的不一致不得自行取舍，记录于 docs/validation/m3.md 的“不一致记录”，配置取不宽于任一设计文档的值。",
+    "数组误差默认 max(abs(a-b))/S；S 为对应显式正物理尺度与相关绝对贡献和的较大者；禁止用接近零的参考值构造不可靠的相对误差。",
+    "eps=np.finfo(float).eps；形如 100*eps*L* 的可计算量用 relative_to_eps_times_length=100 表达，含义不丢失。",
+    "门槛冻结后失败必须分析原因，不得为通过而放宽（m3_freeze.md §6）。",
+    "状态与证据只在 A0/A7 本地实际运行并复核后更新到 docs/validation/m3.md；本文件本身不构成验收，实际执行的命令、退出码与日志见 verification 段。"
+  ],
+  "scales": {
+    "L_star": {"value": 1.0, "unit": "m"},
+    "T_star": {"value": 1.0, "unit": "s"},
+    "U_star": {"value": 1.0, "unit": "m/s"},
+    "rho_star": {"value": 1.0, "unit": "kg/m^3"},
+    "mu_star": {"value": 0.01, "unit": "Pa*s"},
+    "b_star": {"value": 1.0, "unit": "m"},
+    "F_star": {"value": 1.0, "unit": "N"},
+    "W_star": {"value": 1.0, "unit": "N*m"},
+    "P_star": {
+      "value": 1.0,
+      "unit": "Pa",
+      "definition": "max(rho_star*U_star^2, mu_star*U_star/L_star)"
+    },
+    "eps": {
+      "definition": "np.finfo(float).eps",
+      "approx": 2.220446049250313e-16
+    }
+  },
+  "geometry": {
+    "min_volume_ratio": 0.2,
+    "min_quality": 0.1,
+    "quality_limits_default": {"min_volume_ratio": 0.2, "min_quality": 0.1},
+    "require_det_jx_positive": true,
+    "require_det_F_positive": true,
+    "path_check": {
+      "check_det_F_along_straight_path_strictly_positive": true,
+      "endpoints_only_insufficient": true,
+      "check_volume_ratio_limits_along_path": true
+    },
+    "rejection_invariants": {
+      "reference_and_accepted_arrays_bitwise_unchanged": true,
+      "p2_topology_exactly_identical": true,
+      "must_not_crop_nodes_or_swap_orientation_to_hide_flip": true,
+      "error_must_include": ["candidate_id", "cell_or_edge", "min_det_jx", "min_volume_ratio", "min_quality"]
+    },
+    "must_exceed_existing_degeneracy_bound": "32*eps*max(edge_length^2) (TriMesh)",
+    "smooth_motion_min_det_ratio": 0.2,
+    "smooth_motion_min_quality": 0.1,
+    "notes": [
+      "门槛来自 m3_freeze.md §6 与 ale_plan.md §6；实际 FSI 网格须在运行前配置门槛，至少高于现有 32*eps*max(edge_length^2) 数值退化界限。",
+      "拒绝整个候选：不得裁剪节点、不得取绝对行列式或调换单元方向；失败不得修改参考/接受数组。"
+    ],
+    "source": "m3_freeze.md §4/§6；ale_plan.md §2.3/§6；validation_plan.md §4 几何健康"
+  },
+  "general": {
+    "owner": "A0（公共时间模板）；A7 复核",
+    "items": [
+      {
+        "id": "GEN-STENCIL",
+        "title": "BDFStencil 公共时间模板校验",
+        "plan_ref": ["m3_freeze.md §3"],
+        "thresholds": {
+          "coefficient_check_rtol": 1e-12,
+          "check_bdf1_weights": "[1,-1]/dt",
+          "check_mature_bdf2_weights": "[1.5,-2,0.5]/dt",
+          "check_bdf2_startup_step_order": 1,
+          "check_times_spacing_equals_dt": true,
+          "check_arrays_read_only": true,
+          "check_context_stencil_equals_history_stencil": true,
+          "check_candidate_derivative_identity": "coefficients[0]*candidate + sum(coefficients[1:]*states) == context.derivative(candidate)"
+        },
+        "notes": [
+          "BDFStencil.interval_weights：BDF1=(1.0,)，BDF2=(1.5,-0.5)；满足 Q_BDF=sum_k interval_weights[k]*Q[区间 k]、Div_X Q_BDF=sum_j coefficients[j]*j_j=g_BDF。",
+          "现有单场回归不得被破坏（定性要求）。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "GEN-BDF",
+        "title": "BDF 时间阶（M3 通用，三档 dt）",
+        "plan_ref": ["validation_plan.md §4 BDF 时间阶", "spec.md §5.2 瞬态收敛"],
+        "thresholds": {
+          "time_steps": [0.1, 0.05, 0.025],
+          "bdf1_order_min_each_halving": 0.9,
+          "bdf2_order_min_each_halving": 1.8,
+          "startup_order_checked_separately": true,
+          "two_layer_history_checked_separately": true,
+          "min_time_steps_of_study": 3,
+          "min_mesh_levels_of_study": 3,
+          "fixed_space_error_far_below_time_error": true
+        },
+        "notes": [
+          "与 14-03（网格速度 dt=0.05/0.025/0.0125）和 15-04（MMS 时间收敛）各自的 dt 设置区分，不互相替换。",
+          "不能从周期频率的非单调误差直接宣称 BDF2 收敛阶。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "t14": {
+    "owner": "A4a，A1 复核几何/P2",
+    "items": [
+      {
+        "id": "14-01",
+        "title": "调和仿射 patch（平移 + 非零剪切，4/8/16 网格）",
+        "plan_ref": ["validation_plan.md §5 14-01", "ale_plan.md §6 调和仿射 patch", "m3_freeze.md §6 调和仿射 patch"],
+        "thresholds": {
+          "affine_reproduction_max_abs_error_over_Lstar": 1e-11,
+          "free_residual_max_relative": 1e-10,
+          "free_residual_scale": "max(||K*d||, ||lifted_rhs||, 1)",
+          "boundary_constraint_error": {"relative_to_eps_times_length": 100},
+          "boundary_forced_values_must_be_exact_at_nodes": true,
+          "reference_coordinates_unchanged": true,
+          "inputs": {
+            "mesh_sizes": ["4x4", "8x8", "16x16"],
+            "translation": [0.02, -0.01],
+            "affine_shear": "a=(0.03*X_y, 0.02*X_x)"
+          }
+        },
+        "notes": [
+          "A0 裁决（m3_freeze.md §6.1）：维持 1e-11*L*；14-01 为求解级检查（含消元与舍入余量），与 1e-12*S 纯代数恒等式属不同类别；validation_plan.md 14-01 写作 1e-12*L*，不作为本项生效门槛；差异见 docs/validation/m3.md 不一致记录 D1。",
+          "约束误差单位为长度，用 relative_to_eps_times_length=100 表示 100*eps*L*。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "14-02",
+        "title": "调和一般解收敛（三套网格，解析调和场）",
+        "plan_ref": ["validation_plan.md §5 14-02", "ale_plan.md §6 调和一般解收敛", "m3_freeze.md §6 调和一般解收敛"],
+        "thresholds": {
+          "p1_displacement_l2_order_min": 1.8,
+          "p1_displacement_h1_seminorm_order_min": 0.9,
+          "errors_decrease_on_both_refinements": true,
+          "record_actual_h": true,
+          "inputs": {
+            "analytic_field": "a_x=0.02*sin(pi*x)*sinh(pi*y)/sinh(pi), a_y=0",
+            "zero_body_source": true,
+            "boundary": "全边界给解析值"
+          }
+        },
+        "notes": [
+          "不增加非调和物理源项，不用离散算子生成自身真值；ale_plan.md 另允许 exp(X/L*)*cos(Y/L*) 一类解析调和函数。",
+          "网格 4/8/16，不得靠节点数推断实际 h。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "14-03",
+        "title": "BDF 网格速度：线性轨迹与正弦轨迹",
+        "plan_ref": ["validation_plan.md §5 14-03", "ale_plan.md §6 BDF 运动速度", "m3_freeze.md §6 BDF 网格速度"],
+        "thresholds": {
+          "linear_trajectory_max_error_over_Ustar": 1e-12,
+          "linear_trajectory_includes_startup_step": true,
+          "sine_trajectory_bdf1_order_min": 0.9,
+          "sine_trajectory_bdf2_order_min": 1.8,
+          "sine_time_steps": [0.05, 0.025, 0.0125],
+          "mature_bdf2_derivative_order_measured_separately": true,
+          "startup_step_checked_as_bdf1_separately": true,
+          "repeated_candidates_must_not_advance_history": true
+        },
+        "notes": [
+          "解析场 a(t)=b*(1-exp(-t/T*))（仿射空间场）；另做刚性平移与恒速运动。",
+          "BDF2 启动步 order=1，严格跟随 BDFHistory.context().order；不得把启动步误差混进最坏时间点。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "14-04",
+        "title": "构形更新：100 步有限平移/剪切与 P2 中边一致性",
+        "plan_ref": ["validation_plan.md §5 14-04", "ale_plan.md §6 构形/质量拒绝"],
+        "thresholds": {
+          "normal_update_identity_error": {"relative_to_eps_times_length": 100},
+          "p2_topology_exactly_identical": true,
+          "min_volume_ratio": 0.2,
+          "min_quality": 0.1,
+          "steps": 100,
+          "no_accumulated_coordinate_drift": true,
+          "boundary_order_shuffled_same_topology_labels": true
+        },
+        "notes": [
+          "x-X-d=0 至 100*eps*L*；P2 中边点由当前 P1 顶点一致生成，固定连接关系；不得用累计增量推进候选。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "14-05",
+        "title": "几何/质量拒绝与失败不变性",
+        "plan_ref": ["validation_plan.md §5 14-05", "ale_plan.md §6 构形/质量拒绝", "m3_freeze.md §6 几何健康"],
+        "thresholds": {
+          "reject_if_min_volume_ratio_below": 0.2,
+          "reject_if_min_quality_below": 0.1,
+          "reject_if_det_jx_not_positive": true,
+          "reference_and_accepted_arrays_bitwise_unchanged": true,
+          "p2_topology_exactly_identical_after_failure": true,
+          "fail_before_writing_root": true,
+          "error_must_locate": ["tag", "cell_or_edge", "attempt"]
+        },
+        "notes": [
+          "覆盖单元翻转、压扁、NaN/Inf、错形状、未知标签、冲突角点 BC、极端位移跌破质量阈值。",
+          "禁止交换节点来修复移动后的负 det；端点有效而路径退化的大转动拒绝该步；不得原地修改参考坐标或已接受数组。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "t15": {
+    "owner": "A3 实现，A4a 共同冻结接口；A7 复核",
+    "items": [
+      {
+        "id": "15-01",
+        "title": "固定网格退化：ALE 与既有 BDF 残差/切线对比",
+        "plan_ref": ["validation_plan.md §5 15-01", "ale_plan.md §6 固定网格退化", "m3_freeze.md §6 固定网格退化"],
+        "thresholds": {
+          "ale_vs_fixed_residual_tangent_max_scaled_error": 1e-12,
+          "solution_max_diff_over_scale": 1e-10,
+          "same_solver_tolerance_required": true,
+          "existing_fixed_mesh_regressions_must_pass": true,
+          "inputs": {"d": 0, "w": 0, "a": 0}
+        },
+        "notes": [
+          "逐项相对差；同 mesh/material/BC/history/state；确保复用已有物理离散而非另抄一套。",
+          "固定网格时 j_j=1、Q_BDF=g_BDF=0，所有 M_j 相同。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-02",
+        "title": "ALE 常量场：常量残差代入与保持求解（BDF1/2）",
+        "plan_ref": ["validation_plan.md §5 15-02 与 §4 ALE 常量场与质量", "ale_plan.md §6 常量残差代入/常量保持求解"],
+        "thresholds": {
+          "constant_residual_substitution_max_row_defect": 1e-11,
+          "constant_residual_row_scale": "rho_star*integral |v|*sum_j|a_j*j_j|*|U| dX + rho_star*U_star^2*L_star",
+          "max_velocity_drift_over_Ustar": 1e-9,
+          "max_pressure_drift_over_Pstar": 1e-8,
+          "free_physical_residual_max_relative": 1e-8,
+          "continuity_max_scaled_error": 1e-9,
+          "compatible_physical_boundary_flux_max_scaled_error": 1e-9,
+          "record_every_step_not_only_end": true,
+          "keep_pressure_pin": true,
+          "inputs": {
+            "test_velocity": {"value": [0.4, -0.2], "unit": "U_star"},
+            "u0": "U_star*[1, 0.37]",
+            "p0": 0,
+            "body_force": 0,
+            "boundary": "所有外边界 Dirichlet 同 U",
+            "motions": ["全域伸缩", "内部非仿射运动"],
+            "duration_s": 1.0,
+            "time_steps": [0.05, 0.025, 0.0125]
+          }
+        },
+        "notes": [
+          "常量残差代入：消元前动量残差和全压力残差分别检查；不能只检查自由行。",
+          "常量保持：初始常量、首步与成熟 BDF2 历史齐全；含 u!=w_kin 情形；常量边界允许流入流出，不用扩张闭域的零壁速制造不相容不可压边界。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-03",
+        "title": "变体积域：瞬时控制域关系与离散扫掠 GCL",
+        "plan_ref": ["validation_plan.md §5 15-03", "ale_plan.md §6 移动控制域收支"],
+        "thresholds": {
+          "instantaneous_moving_domain_relation_max_scaled_error": 1e-9,
+          "bdf_swept_volume_budget_max_scaled_error": 1e-10,
+          "normalization": "U_star*L_star",
+          "wgcl_vs_wkin_gap_must_decay_with_dt": true,
+          "closed_incompressible_domain_with_volume_growth_invalid": true
+        },
+        "notes": [
+          "瞬时关系 integral (u-w_kin)·n ds + integral div(w_kin) dx；BDF 几何收支单独用 Q_BDF。",
+          "有限 dt 下不得要求 w_gcl=w_kin，也不得用 w_gcl 覆盖界面 Dirichlet 值；两者差异随 dt 的一阶/二阶衰减需记录。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-04",
+        "title": "ALE 制造解（Piola 映射；空间/时间分离研究）",
+        "plan_ref": ["validation_plan.md §5 15-04", "ale_plan.md §6 末段"],
+        "thresholds": {
+          "p2_velocity_l2_order_min": 2.5,
+          "p1_pressure_l2_order_min": 1.8,
+          "mesh_levels": [8, 16, 32],
+          "bdf1_order_min": 0.9,
+          "bdf2_order_min": 1.8,
+          "min_time_steps": 3,
+          "report_spatial_error_plateau_and_startup_effect": true
+        },
+        "notes": [
+          "参考平滑散度零速度用 Piola u=J^-1*F*u_hat 映射到当前域，p 为映射后的解析标量；右端/边界用解析时空导数（运行前冻结表达式），独立确认而非由离散残差反算体力。",
+          "固定充分细网格做时间研究，固定足够小 dt 做空间研究；两类误差分开。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-05",
+        "title": "导数扫描：流体块与几何 JVP",
+        "plan_ref": ["validation_plan.md §5 15-05 与 §4 Jacobian 方向导数", "ale_plan.md §6 导数扫描", "m3_freeze.md §6 导数扫描"],
+        "thresholds": {
+          "center_difference_min_relative_directional_error": 1e-5,
+          "perturbation_scan": [1e-2, 1e-7],
+          "direction_scale": ["U_star", "rho_star*U_star^2/L_star"],
+          "zero_response_directions_use_absolute_scale": true,
+          "show_truncation_and_rounding_trend": true,
+          "non_linear_non_quadratic_residual_expected": true
+        },
+        "notes": [
+          "固定历史，分别扰动 u/p、a 与 w；delta_w_kin=a_0*delta_d_m；仅重建被扰动几何。",
+          "必须覆盖当前 J_x/F/j、梯度、质量、散度/压力、黏性、体力空间求值、物理对流、扫掠余因子及 g_BDF；任意 callable 体力/边界无空间导数协议时标注中心差分。",
+          "M3 不要求完整 FSI Newton；T21 再补完整界面约束与全局耦合块（见 16-DER）。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-06",
+        "title": "缓存失效与线性求解真残差",
+        "plan_ref": ["validation_plan.md §5 15-06 与 §3.4", "ale_plan.md §3.4"],
+        "thresholds": {
+          "current_force_flux_vs_per_edge_integral_max_scaled_error": 1e-10,
+          "true_linear_residual_max_relative": 1e-10,
+          "cold_vs_rebuilt_solution_max_diff": 1e-10,
+          "old_geometry_cache_must_be_rejected_or_rebuilt": true
+        },
+        "notes": [
+          "同时间系数下先移网格再移回，改变 viscosity/BC/pressure pin；故意取旧 geometry_id 的算子/监测器/LU 必须失效。",
+          "LU 回退继续检查当前物理矩阵真残差（沿用 ≤1e-10 的现有检查）；缓存预条件残差不能替代物理残差。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-GCL",
+        "title": "离散 GCL：逐单元体积-通量一致性（BDF1/2）",
+        "plan_ref": ["ale_plan.md §6 离散 GCL", "m3_freeze.md §6 离散 GCL"],
+        "thresholds": {
+          "cell_gcl_max_scaled_error": 1e-11,
+          "cell_gcl_scale": "S_g=max(sum_j|a_j*j_j|, 1/T_star)",
+          "scheme_bdf1": "Q_BDF=Q[n+1,n]",
+          "scheme_bdf2": "Q_BDF=1.5*Q[n+1,n]-0.5*Q[n,n-1]",
+          "g_bdf_definition": "g_BDF=sum_j a_j*j_j; 要求 Div_X Q_BDF=g_BDF",
+          "report_dimensional_defect": true,
+          "report_defect_relative_to_inverse_Tstar": true,
+          "inputs": {
+            "motions": ["x=(1+0.05*sin t)*X", "d=0.03*L_star*sin(pi*X/L_star)*sin(pi*Y/L_star)*[sin t, cos t] 的 P1 插值"],
+            "templates": ["BDF1", "BDF2"]
+          }
+        },
+        "notes": [
+          "逐单元检查，非只查自由行；必须真正满足 Div_X Q_BDF=g_BDF，不得以事后抵消常量残差冒充守恒。",
+          "同时报告有量纲缺陷及相对 1/T* 的缺陷，避免 1/dt 分母掩盖问题。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-SWEEP",
+        "title": "扫掠体积守恒与共享边相消",
+        "plan_ref": ["ale_plan.md §6 扫掠体积/共享边", "m3_freeze.md §6 扫掠体积/共享边"],
+        "thresholds": {
+          "cell_swept_volume_max_scaled_error": 1e-11,
+          "cell_swept_volume_scale": "S_e=max(sum_j|a_j*area_j|, area_ref/T_star)（与冻结的 S_g 同型：max(|BDF 导数|, 量/T*)）",
+          "internal_edge_cancellation_max_scaled_error": 1e-12,
+          "internal_edge_scale": "U_star*L_star",
+          "global_budget_max_scaled_error": 1e-10,
+          "global_budget_scale": "U_star*L_star",
+          "per_cell_identity": "D_BDF area = integral_boundary Q·N dS_X；全域只剩外边通量"
+        },
+        "notes": [
+          "内部边按全局固定方向记录一次，两侧符号相反；不得只检查全域收支。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-MASS",
+        "title": "ALE 质量/连续性诊断",
+        "plan_ref": ["ale_plan.md §6 ALE 质量", "validation_plan.md §4 ALE 常量场与质量"],
+        "thresholds": {
+          "physical_boundary_flux_max_scaled_error": 1e-9,
+          "physical_boundary_flux_scale": "U_star*L_star",
+          "divergence_row_max_scaled_error": 1e-9,
+          "divergence_row_scale": "U_star*integral |grad N_p| dx + 小尺度下限",
+          "report_absolute_values": true,
+          "report_existing_continuity_residual": true,
+          "check_pressure_pin_row": true
+        },
+        "notes": [
+          "当前全边界 integral u·n_f ds 对 B_current u；另测几何扫掠 D_BDF volume。",
+          "现有 max(norm,1) 型残差不能替代物理量尺度，两者都报。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-MON",
+        "title": "当前边界监测（变形矩形解析对照）",
+        "plan_ref": ["ale_plan.md §6 当前边界监测"],
+        "thresholds": {
+          "monitor_vs_independent_analytic_max_relative_scale_error": 1e-11,
+          "old_geometry_monitor_must_reject_or_rebuild": true,
+          "inputs": {"flow": "常压力、仿射速度", "geometry": "变形矩形，解析当前法向/边长"}
+        },
+        "notes": [
+          "BoundaryMonitor 与独立积分、解析力/流量的相对尺度误差；旧几何 monitor 不得用于新候选。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "15-ROLLBACK",
+        "title": "T15 范围重复候选与失败保持",
+        "plan_ref": ["ale_plan.md §6 重复候选和回滚", "m3_freeze.md §6 T17 回滚"],
+        "thresholds": {
+          "accepted_history_and_snapshot_exactly_equal": "np.array_equal",
+          "old_token_and_context_must_reject": true,
+          "retry_vs_baseline_max_scaled_diff": 1e-10
+        },
+        "notes": [
+          "候选求解不得调用 BDFHistory.accept；失败发放新 attempt token 使旧上下文失效。",
+          "A0 裁决（m3_freeze.md §6.1）：T15-ROLLBACK 与 T17 的完整重试-基线比较维持 1e-10；ale_plan.md 的 1e-12 仅作为同输入重复候选评估的观察目标，不作为拒绝门槛；数组与历史仍要求 np.array_equal；差异见 docs/validation/m3.md 不一致记录 D2。",
+          "全场接受与回滚的完整验收归 T17（见 t17）。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "t16": {
+    "owner": "A4b，A1/A3 复核；A7 复核证据",
+    "items": [
+      {
+        "id": "16-01",
+        "title": "拓扑与运动：编号打乱/边反向，P1 到 P2 精确映射",
+        "plan_ref": ["validation_plan.md §5 16-01", "interface_plan.md §9 拓扑与方向/运动阶次"],
+        "thresholds": {
+          "h_mapping_max_scaled_error": 1e-12,
+          "scale": "S（见 16-SCALE）",
+          "h_times_ones_equals_ones": true,
+          "p2_trace_equals_p1_trace_on_full_edge": true,
+          "midpoint_is_endpoint_average": true,
+          "current_coordinates_xf_equals_h_xs": true,
+          "all_interface_dof_locations_unique": true,
+          "vertex_rows_registered_once": true
+        },
+        "notes": [
+          "H=h⊗I_2；P2 边形函数乘 h 后精确等于 P1 边形函数（整条边上成立，不只节点）。",
+          "相同编号不是判定匹配的唯一条件；流体 owner 边反向时积分参数 s_s=1-s_f，不能把端点列次序当一致。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-02",
+        "title": "时间一致性：a=H_vertex d, u=H v, w_kin=H v",
+        "plan_ref": ["validation_plan.md §5 16-02", "interface_plan.md §9 时间一致性"],
+        "thresholds": {
+          "motion_mapping_max_scaled_error": 1e-12,
+          "bdf_exchange_max_scaled_error": 1e-12,
+          "bdf_exchange_identity": "D_BDF(H*d)=H*D_BDF(d)，条件为同 dt、同实际阶次、同已接受历史且 v=D_BDF d",
+          "startup_and_mature_bdf2_steps": true,
+          "two_layer_history_required": true,
+          "asynchronous_or_missing_history_or_old_owner_rejected_before_solve": true,
+          "repeated_candidates_must_not_modify_history": true,
+          "inputs": ["零", "平移", "仿射", "随机界面值"]
+        },
+        "notes": [
+          "未收敛整体候选若 d/v 独立，须报告运动残差 v_s-D_BDF d_s，不得强行声称相等或修改历史消除。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-03",
+        "title": "压力/黏性符号与解析牵引积分",
+        "plan_ref": ["validation_plan.md §5 16-03 与 §4 界面运动/功/力", "interface_plan.md §9 压力和黏性符号/常牵引解析力"],
+        "thresholds": {
+          "analytic_traction_integral_max_scaled_error": 1e-12,
+          "analytic_traction_scale": "S（力取 max(F_star, sum_eq b*l*w*||t||)）",
+          "validation_plan_alternative_max_scaled_error": 1e-10,
+          "four_surface_orientations": true,
+          "traction_definition": "t_s=-sigma_f*n_f=sigma_f*n_s；sigma_f=-p*I+mu*(grad_x u+grad_x u^T)",
+          "shear_stress_case": "mu*[[0,gamma],[gamma,0]]",
+          "same_sign_as_existing_boundary_force": true,
+          "fluid_reaction_role": "独立对照，不混作另一载荷离散"
+        },
+        "notes": [
+          "水平、竖直、斜边上的恒压及线性剪应力；按 CCW 单元计算 n_fluid；反向边标签不改变物理符号。",
+          "A0 裁决（m3_freeze.md §6.1）：16-03、16-05 小型确定性用例采用更严的 1e-12*S；validation_plan.md 的 1e-10 保留为参考值；需明确条件数限制证据并经 A0/A7 复核方可调整；见 docs/validation/m3.md 不一致记录 D3。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-04",
+        "title": "虚功/功率与 Hᵀ 对偶载荷映射",
+        "plan_ref": ["validation_plan.md §5 16-04 与 §4 界面运动/功/力", "interface_plan.md §9 虚功与功率/总力与当前总矩"],
+        "thresholds": {
+          "virtual_work_max_scaled_error": 1e-12,
+          "power_max_scaled_error": 1e-12,
+          "virtual_work_identity": "delta_d.T*f_s_gamma=(H*delta_d).T*g_f_gamma；功率同理",
+          "work_scale": "max(|W_f|, |W_s|, W_star)",
+          "force_scale": "max(||F_f||, ||F_s||, F_star)",
+          "moment_scale": "max(M_star, sum_eq b*l*w*||(x_q-o)||*||t||)",
+          "h_preserves_constants_for_total_force": true,
+          "h_preserves_affine_for_current_moment": true,
+          "clamped_node_loads_kept": true,
+          "multiple_interface_datasets": true
+        },
+        "notes": [
+          "g_f_gamma 为以流体 P2 迹基积分的、作用于固体的 Cauchy 应力迹对偶节点力；Hᵀ 只作用于已积分节点力。",
+          "固定种子非零虚位移/v；总力三量比较 F_s/F_g/F_quad，当前总矩三量比较并检查 M(o+a)=M(o)-a×F；不得先删夹持节点再查完整界面总力/总矩。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-05",
+        "title": "Nanson/参考转换与厚度只计一次",
+        "plan_ref": ["validation_plan.md §5 16-05 与 §4 界面运动/功/力", "interface_plan.md §5/§9 Nanson/参考转换"],
+        "thresholds": {
+          "current_vs_reference_integral_max_scaled_error": 1e-12,
+          "validation_plan_alternative_max_scaled_error": 1e-10,
+          "thickness_values": [0.2, 1.0, 2.0],
+          "length_normal_thickness_counted_once": true,
+          "include_non_unit_Js": true,
+          "check_J_equals_1_with_nonunit_edge_ratio": true,
+          "no_ale_volume_F_instead_of_solid_Fs": true,
+          "identity": "n_s ds=J_s*F_s^-T*N_s dS；l/L0=J_s*||F_s^-T*N_s||；T_s0=J_s*sigma_f*F_s^-T*N_s"
+        },
+        "notes": [
+          "当前 t_s 路径乘 l*w_q，参考 T_s0 路径乘 L0*w_q，厚度 b 都只一次；已组装节点力输入不再积分、不乘任何 Jacobian/厚度。",
+          "A0 裁决（m3_freeze.md §6.1）：采用更严的 1e-12*S；validation_plan.md 的 1e-10 保留为参考值；需明确条件数限制证据并经 A0/A7 复核方可调整；见不一致记录 D3。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-06",
+        "title": "异常拓扑/匹配拒绝与状态不变",
+        "plan_ref": ["validation_plan.md §5 16-06", "interface_plan.md §9 异常与诊断"],
+        "thresholds": {
+          "reject_cases": [
+            "未知/空标签",
+            "重复/缺失节点",
+            "重复/交叉边",
+            "非 exterior 或多个 owner",
+            "歧义匹配",
+            "分段不匹配",
+            "零长度",
+            "NaN/Inf",
+            "非正 J",
+            "错误维度/厚度",
+            "版本错配",
+            "冲突端点约束"
+          ],
+          "must_not_silently_nearest_neighbor_match": true,
+          "mapping_interface_caches_and_accepted_state_unchanged_after_failure": true,
+          "empty_interface_is_not_success": true,
+          "empty_load_is_valid_zero": true
+        },
+        "notes": [
+          "明确失败并定位标签/边/候选；M3 不悄悄启用最近邻非匹配映射；T16 不自动移动参考节点。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-SCALE",
+        "title": "统一容差尺度 S 定义（小型确定性用例）",
+        "plan_ref": ["interface_plan.md §9 首段", "validation_plan.md §4 误差定义与统一尺度"],
+        "thresholds": {
+          "small_case_algebra_integral_max_scaled_error": 1e-12,
+          "definitions": {
+            "general": "S=max(显式正物理尺度, 相关绝对贡献和)",
+            "work": "max(W_star, ||delta_d_f||*||g_f||, ||delta_d_s||*||f_s||)",
+            "force": "max(F_star, sum_eq b*l*w*||t||)",
+            "moment": "max(M_star, sum_eq b*l*w*||(x_q-o)||*||t||)"
+          }
+        },
+        "notes": [
+          "零力/零功不得除零；禁止用很大的总功掩盖小界面项；同时报告两侧有符号功。",
+          "大规模累加容差需事先依据项数、机器精度和条件数评审，不得仅为消除失败而放宽。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-MATCH",
+        "title": "参考匹配容差（小型测试）",
+        "plan_ref": ["interface_plan.md §2 与 §9 几何误差"],
+        "thresholds": {
+          "atol": {"relative_to_Lstar": 1e-12, "unit": "m"},
+          "rtol": 1e-12,
+          "paired_at_reference_once": true,
+          "no_rematch_after_deformation": true,
+          "no_silent_gap_patching": true
+        },
+        "notes": [
+          "atol=1e-12*L、rtol=1e-12；生产建网容差由 A0/A1 核定并记录。",
+          "若 X_f_gamma=h*X_s_gamma 未满足既定精度，须在建网阶段输出一致参考界面后重建拓扑。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-GEOM",
+        "title": "法向与表面比一致性",
+        "plan_ref": ["m3_freeze.md §6 法向/表面比", "interface_plan.md §4/§9"],
+        "thresholds": {
+          "normal_opposition_max_scaled_error": 1e-12,
+          "two_surface_ratio_paths_max_scaled_error": 1e-12,
+          "normal_unit_and_ns_plus_nf_checked": true,
+          "corner_normals_per_edge_not_averaged": true
+        },
+        "notes": [
+          "n_s=-n_f；两种 j_Gamma 的差按尺度化误差 ≤1e-12；不得用全局排序边方向代替物理外法向。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-DYN",
+        "title": "界面动态几何缓存",
+        "plan_ref": ["interface_plan.md §9 动态几何缓存", "validation_plan.md §3.4 缓存"],
+        "thresholds": {
+          "old_geometry_monitor_must_not_be_used_for_new_candidate": true,
+          "new_loads_follow_new_length_normal_gradient": true,
+          "repeat_after_reverting_geometry": true
+        },
+        "notes": [
+          "同一拓扑连续两个非等长候选，压力/速度固定；每次候选几何变化都重算长度、法向、流体物理梯度和应力积分。",
+          "参考拓扑、基函数在局部参数位置的值可复用；界面力不得使用接受根的旧监测器（fluid 侧数值见 15-06）。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "16-DER",
+        "title": "下游导数门槛（T21 前，界面块）",
+        "plan_ref": ["interface_plan.md §9 下游导数门槛", "validation_plan.md §4 Jacobian 方向导数", "m3_freeze.md §6 导数扫描"],
+        "thresholds": {
+          "center_difference_min_relative_directional_error": 1e-5,
+          "perturbation_scan": [1e-2, 1e-7],
+          "zero_response_directions_use_absolute_scale": true,
+          "show_error_trend": true
+        },
+        "notes": [
+          "针对同一组装核的 u/p/几何非退化方向；几何导数包含应力物理梯度、法向、长度，参考路径还包含表面比。",
+          "stvk_residual 现有矩阵不包含随动界面载荷项；未完成前不称完整整体 Jacobian。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "t17": {
+    "owner": "A0 实现；A7 复核",
+    "notes": [
+      "每种故障均在 BDF1 启动（1 层历史）和成熟 BDF2（2 层历史）执行；正常候选至少包含非零 d/v/u/p/a/w 与载荷。",
+      "生命周期为 open -> prepared -> committed 或 open/prepared -> aborted，终态不可重入；失败 attempt_id 永不复用。",
+      "候选/结果/快照不得与接受根共享可变存储；接受和快照使用深复制。"
+    ],
+    "items": [
+      {
+        "id": "17-01",
+        "title": "begin 与上下文校验",
+        "plan_ref": ["validation_plan.md §5 17-01"],
+        "assertions": [
+          "外来同形状 snapshot/context、错字段 owner、过期 epoch、dt/order/层数不同、非法 dt 在任何 live 写入前拒绝",
+          "故意输入可写别名：复制输入后修改原数组不污染事务/根",
+          "同 generation/time 的异 owner 也拒绝"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-02",
+        "title": "几何与固体注入（翻转/低质量/det(F) 非正/Newton 失败）",
+        "plan_ref": ["validation_plan.md §5 17-02"],
+        "assertions": [
+          "全场回滚，包括 x/a/w、压力/预测器、载荷和两层历史",
+          "无成功监测行；诊断含阶段/单元号或迭代原因",
+          "移动网格后触发翻转/低质量；固体求解成功后触发 det(F) 非正或 Newton/线搜索失败"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-03",
+        "title": "流体与缓存注入（奇异矩阵/GMRES 回退失败/max_iterations=1）",
+        "plan_ref": ["validation_plan.md §5 17-03"],
+        "assertions": [
+          "不接受固体；失败缓存不在下一尝试出现；根精确一致",
+          "记录真残差和失败原因",
+          "已建新 BoundaryMonitor 和 LU 后注入异常仍满足上述要求"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-04",
+        "title": "末端校验注入（NaN/Inf、错 shape、运动/功失配、质量超限）",
+        "plan_ref": ["validation_plan.md §5 17-04"],
+        "assertions": [
+          "即使所有单场 solve 返回成功，validate 失败也必须丢弃整个候选",
+          "所有接受计数不变"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-05",
+        "title": "prepare 部分接受失败",
+        "plan_ref": ["validation_plan.md §5 17-05"],
+        "assertions": [
+          "分别在固体私有 accept 后、流体私有 accept 后、网格私有 accept 后、冻结新根/监测行序列化时抛 RuntimeError",
+          "live 根及所有历史完全不变；读取者只能见旧根",
+          "不存在时间不同步或仅部分 generation 增加的根"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-06",
+        "title": "publish 与重入",
+        "plan_ref": ["validation_plan.md §5 17-06"],
+        "assertions": [
+          "publish 前模拟 base_epoch 冲突：冲突候选无写入",
+          "成功后重复 commit、abort、accept 旧候选/context 明确拒绝",
+          "成功恰好推进一次，全场 target_time/epoch 同步；已提交后 abort 不撤回物理步"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-07",
+        "title": "重复评估",
+        "plan_ref": ["validation_plan.md §5 17-07 与 §4 重试"],
+        "thresholds": {
+          "same_input_solves_min": 3,
+          "same_input_retry_max_scaled_diff": 1e-10
+        },
+        "assertions": [
+          "base 及 contexts 历史保持精确不变",
+          "改变/恢复候选初值后，仅最终 commit 增历史"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-08",
+        "title": "失败重试与冷启动一致",
+        "plan_ref": ["validation_plan.md §5 17-08 与 §4 重试", "m3_freeze.md §6 T17 回滚"],
+        "thresholds": {
+          "retry_vs_cold_baseline_max_scaled_diff": 1e-10,
+          "continue_steps_after_retry_min": 2,
+          "consecutive_failures_before_success": 3,
+          "accepted_steps_and_time_must_match_exactly": true
+        },
+        "assertions": [
+          "旧 attempt/context 全部失效",
+          "失败计数和日志单列，不附加伪成功监测行"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-09",
+        "title": "所有权与深复制",
+        "plan_ref": ["validation_plan.md §5 17-09 与 §3.1"],
+        "assertions": [
+          "对 candidate/result/snapshot/public states 重新设 writeable 并修改，不改变接受根",
+          "流体 u/p 共底层 view 的情况单独覆盖",
+          "数组字节/shape/dtype 均保持不变量，两层历史无可写共享"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-10",
+        "title": "输出故障与幂等补写",
+        "plan_ref": ["validation_plan.md §5 17-10"],
+        "assertions": [
+          "prepare 序列化失败：abort 无推进",
+          "publish 后磁盘写失败：保留已提交物理根并标记 output_pending，不重新 solve/accept",
+          "同 accepted_epoch 仅有一条成功记录"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-ROLLBACK",
+        "title": "数组/历史回滚精确不变",
+        "plan_ref": ["m3_freeze.md §6 T17 回滚", "validation_plan.md §4 数组/历史回滚"],
+        "thresholds": {
+          "array_and_history_equality": "np.array_equal",
+          "coverage": ["两层数组", "压力", "初值", "界面/网格", "监测行不变化（失败审计可追加）"],
+          "exact_equality_fields": ["t", "dt", "order", "历史层数", "接受计数", "原 BDF generation"],
+          "public_owner_and_attempt_relations_per_section_3": true
+        },
+        "notes": [
+          "回滚检查通过状态遍历器覆盖所有字段，不只检查 history.time；缓存遍历器确保候选缓存不可跨 attempt 使用。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "17-RETRY",
+        "title": "同条件重试 vs 无失败基线",
+        "plan_ref": ["validation_plan.md §4 同条件重试 vs 无失败基线", "m3_freeze.md §6 T17 回滚"],
+        "thresholds": {
+          "all_fields_max_scaled_diff": 1e-10,
+          "next_steps_min": 2,
+          "base_snapshot_must_be_exactly_equal": true
+        },
+        "notes": [
+          "各场归一化 max 差 ≤1e-10；接下来至少两步也通过。",
+          "A0 裁决（m3_freeze.md §6.1）：完整重试-基线比较维持 1e-10；ale_plan.md 的 1e-12 仅作为同输入重复候选评估的观察目标，不作为拒绝门槛；数组与历史仍要求精确相等；见不一致记录 D2。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "inconsistencies": [
+    {
+      "id": "D1",
+      "topic": "14-01 调和仿射 patch 误差上限",
+      "documents": {
+        "validation_plan.md §5 14-01": "误差 <=1e-12*L*",
+        "ale_plan.md §6 调和仿射 patch": "max|d_h-d|/L* <=1e-11",
+        "m3_freeze.md §6 调和仿射 patch": "max|d_h-d|/L* <=1e-11"
+      },
+      "resolution": "已由 A0 裁决（m3_freeze.md §6.1）：维持 1e-11*L*；14-01 为求解级检查（含消元与舍入余量），与 1e-12*S 纯代数恒等式属不同类别；validation_plan 14-01 的 1e-12 不作为本项生效门槛；详见 docs/validation/m3.md 不一致记录 D1"
+    },
+    {
+      "id": "D2",
+      "topic": "同条件重试与基线差容差",
+      "documents": {
+        "ale_plan.md §6 重复候选和回滚": "重试解按 1e-12 数值尺度一致",
+        "m3_freeze.md §6 T17 回滚": "重试-基线差 <=1e-10",
+        "validation_plan.md §4 同条件重试": "各场归一化 max 差 <=1e-10"
+      },
+      "resolution": "已由 A0 裁决（m3_freeze.md §6.1）：T15-ROLLBACK 与 T17 的完整重试-基线比较维持 1e-10；ale_plan 的 1e-12 仅作为 T14/T15 同输入重复候选评估的观察目标，不作为拒绝门槛；数组与历史仍要求 np.array_equal；详见不一致记录 D2"
+    },
+    {
+      "id": "D3",
+      "topic": "界面解析牵引积分/构形转换容差",
+      "documents": {
+        "validation_plan.md §4/§5（16-03、16-05）": "解析牵引积分/构形转换归一化误差 <=1e-10",
+        "interface_plan.md §9": "小型确定性用例代数/积分容差统一建议 1e-12*S",
+        "m3_freeze.md §6": "界面代数恒等式 <=1e-12*S；常牵引仅给出解析系数 (1/6,1/6,2/3) 与 b*l*t/2"
+      },
+      "resolution": "已由 A0 裁决（m3_freeze.md §6.1）：16-03、16-05 小型确定性用例采用更严的 1e-12*S（现配置值即此）；validation_plan 的 1e-10 保留为参考值；需明确条件数限制证据并经 A0/A7 复核方可调整；详见不一致记录 D3"
+    }
+  ]
+}

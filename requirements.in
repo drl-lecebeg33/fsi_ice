@@ -1,0 +1,5 @@
+# Direct dependencies; requirements.txt records the locally verified versions.
+numpy
+scipy
+matplotlib
+pytest

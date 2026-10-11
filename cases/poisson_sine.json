@@ -1,0 +1,9 @@
+{
+  "case": "poisson_sine",
+  "mesh_levels": [8, 16, 32],
+  "acceptance": {
+    "l2_order_min": 1.8,
+    "h1_order_min": 0.9,
+    "residual_max": 1e-10
+  }
+}

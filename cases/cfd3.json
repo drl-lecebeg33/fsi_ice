@@ -1,0 +1,16 @@
+{
+  "case": "cfd3",
+  "mesh_levels": [0.02, 0.01, 0.005],
+  "time_steps": [0.02, 0.01, 0.005],
+  "mesh_study_dt": 0.01,
+  "end_time": 10.0,
+  "acceptance": {
+    "frequency_relative_error_max": 0.05,
+    "amplitude_relative_error_max": 0.10,
+    "mean_relative_error_max": 0.10,
+    "small_mean_absolute_error_max": 20.0,
+    "period_variation_max": 0.05,
+    "residual_max": 1e-8,
+    "mass_error_max": 1e-10
+  }
+}

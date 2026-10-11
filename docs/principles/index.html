@@ -359,6 +359,15 @@
     它与分区耦合共享同一套残差与物理模型，验收标准是在相同离散下两种方法收紧容差后得到一致解。
   </p>
   <p>
+    <strong>FSI2 与算法比较（计划，M6）：</strong>FSI1 是稳态基准——流过圆柱的流体给弹性梁一个稳定推力；
+    FSI2 把它换成瞬态——流体让梁大幅振动、产生周期性响应，需要测<strong>稳定周期区间</strong>的位移振幅、阻力均值、主频等多项指标。
+    <strong>IQN-ILS</strong> 是更聪明的分区加速：把过去若干步的界面残差当作"基向量"，用最小二乘预测下一步松弛量，
+    适合历史信息丰富、求解器每步代价不低的瞬态 FSI。
+    M6 的目标是：用同一种瞬态离散，分别让<strong>固定松弛、Aitken、IQN-ILS 和整体 Newton</strong>跑同一道题，
+    在物理误差相当的前提下比较它们的<strong>每步时间、组装耗时、迭代次数和失败步数</strong>——
+    "正确"的方法之间才有资格谈"哪个更快更稳"。
+  </p>
+  <p>
     <strong>证据：</strong><a href="../development/t18_plan.md">T18 计划</a>、<a href="../validation/t18.md">T18 记录</a>、
     <a href="../validation/t19.md">T19 Aitken 验收</a>、<a href="../development/fsi1_plan.md">FSI1 计划</a>、<a href="../validation/t20.md">T20 验收</a>；
     代码 <a href="../../src/fsi_ice/coupling/partitioned.py">coupling/partitioned.py</a>；
@@ -423,6 +432,12 @@
             <a href="../validation/m3.md">m3.md</a>、<a href="../validation/t18.md">t18.md</a>、<a href="../validation/t19.md">t19.md</a>、
             <a href="../validation/t20.md">t20.md</a>；全量回归 432 项通过（本地实际运行，123.44 s）；
             本次修改另做了 HTML 结构、导航锚点和本地链接检查</td>
+      </tr>
+      <tr>
+        <td>2026-10-11</td>
+        <td>耦合</td>
+        <td>第 2 次维护：coupling 节补充 FSI2 与 IQN-ILS 的“计划”概念描述（FSI2 是瞬态响应基准，需测稳定周期区间的位移振幅 / 阻力均值 / 主频；IQN-ILS 用历史残差预测下一步松弛，是更聪明的分区加速），并说明 M6 要在同一种瞬态离散下公平比较固定松弛 / Aitken / IQN-ILS / 整体 Newton 的精度与成本。状态表未改动，M5/M6 仍标记为“计划”</td>
+        <td>本次仅文档维护：61 条唯一本地 href 全部解析、9 个 fragment 锚点对应有效 id、HTML 标签平衡、0 外链脚本与样式、中文编码无乱码；未改动求解逻辑，未重跑数值测试。FSI1 数据沿用初版记录（<a href="../validation/t20.md">T20</a>）</td>
       </tr>
     </tbody>
   </table>

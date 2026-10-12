@@ -37,6 +37,21 @@ class HarmonicExtension:
         self.reference_mesh = reference_mesh
         self.diffusion = value
         self._matrix, self._rhs = assemble_poisson(reference_mesh, 0.0, value)
+        self._matrix.data.setflags(write=False)
+        self._matrix.indices.setflags(write=False)
+        self._matrix.indptr.setflags(write=False)
+        self._rhs.setflags(write=False)
+
+    @property
+    def stiffness(self):
+        """Read-only P1 Laplace stiffness ``K_h`` assembled on the reference mesh.
+
+        This is the same matrix :meth:`extend` solves with (zero source).  The
+        arrays are frozen, so a caller can reuse it directly, e.g. as the mesh
+        block of the monolithic residual, without copying or risking an
+        accidental modification of the shared extension operator.
+        """
+        return self._matrix
 
     def extend(self, boundary_nodes, displacement_values):
         """Solve -Div(diffusion grad(d_m)) = 0 with the given exterior values."""

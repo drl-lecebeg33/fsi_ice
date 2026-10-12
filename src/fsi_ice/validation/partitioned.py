@@ -46,13 +46,18 @@ def validate_config(config):
         raise ValueError("mesh must be [nx,ny] with integers >=2.")
     for group, keys in schemas.items():
         values = config[group]
-        optional = {"method", "minimum_relaxation", "maximum_relaxation", "aitken_denominator_tolerance"} \
-            if group == "coupling" else set()
+        optional = {"method", "minimum_relaxation", "maximum_relaxation", "aitken_denominator_tolerance",
+                    "iqn_initial_relaxation", "iqn_alpha_max", "iqn_history_size",
+                    "iqn_restart_tolerance"} if group == "coupling" else set()
         if not isinstance(values, dict) or not keys <= set(values) or not set(values) <= keys | optional:
             raise ValueError(f"Invalid {group} config schema.")
         for name, value in values.items():
             if group == "coupling" and name == "method":
                 continue  # CouplingOptions validates the algorithm selector.
+            if group == "coupling" and name == "iqn_history_size":
+                if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 0:
+                    raise ValueError("iqn_history_size must be a nonnegative integer.")
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
                 raise ValueError(f"{group} values must be finite real numbers.")
     dt = config["dt"]

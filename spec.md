@@ -1,6 +1,6 @@
 # fsi_ice 开发规格
 
-状态：第一版开发基线。M0–M5 已完成：单场、ALE、界面与事务、固定/Aitken 分区控制器、稳态 FSI1、整体残差与完整耦合 Jacobian、整体 Newton 与伪时间定常推进、同离散配置一致性比较与成本统计均已本地验证。T20 三网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足冻结的 5% 门槛；M5 在 h=0.02 上三种方法（整体/固定/Aitken）逐变量一致（最大差 ≤8.3e-11，最不利裕度比 0.984；[M5 矩阵](docs/validation/m5.md)），23-08 的粗网格字面物理门槛如实记为 failed（网格分辨率限制，最细档物理门槛沿用 T20 证据）。证据见 [T20 验收](docs/validation/t20.md)、[T21](docs/validation/t21.md)/[独立复核](docs/validation/t21_review.md)、[T22](docs/validation/t22.md)、[T23](docs/validation/t23.md)。下一阶段为 M6：FSI2 瞬态、IQN-ILS 与四种耦合算法比较；FSI2 尚未实现。
+状态：第一版开发基线。M0–M5 已完成：单场、ALE、界面与事务、固定/Aitken 分区控制器、稳态 FSI1、整体残差与完整耦合 Jacobian、整体 Newton 与伪时间定常推进、同离散配置一致性比较与成本统计均已本地验证。T20 三网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足冻结的 5% 门槛；M5 在 h=0.02 上三种方法（整体/固定/Aitken）逐变量一致（最大差 ≤8.3e-11，最不利裕度比 0.984；[M5 矩阵](docs/validation/m5.md)），23-08 的粗网格字面物理门槛如实记为 failed（网格分辨率限制，最细档物理门槛沿用 T20 证据）。证据见 [T20 验收](docs/validation/t20.md)、[T21](docs/validation/t21.md)/[独立复核](docs/validation/t21_review.md)、[T22](docs/validation/t22.md)、[T23](docs/validation/t23.md)。M6/T24/T25 进行中：FSI2 原始参数、共用BDF/ALE的分区/整体瞬态驱动、全场事务与CLI已实现并通过短程本地验证（[T24](docs/validation/t24.md)）；IQN-ILS 控制器已实现并在 T18 线性有限元同离散上验收（fixed=27 / Aitken=7 / IQN-ILS=11 次评估，三方法逐变量一致，[T25](docs/validation/t25.md)）；稳定周期与基准精度、三网格/三步长收敛及四算法（fixed/Aitken/IQN-ILS/monolithic）公平比较尚未完成，不得标记M6通过。
 
 ## 1. 项目目标
 

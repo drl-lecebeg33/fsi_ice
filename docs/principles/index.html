@@ -16,7 +16,7 @@
   h2 { font-size:1.15rem; margin:2rem 0 .6rem; padding-bottom:.3rem; border-bottom:1px solid var(--line); }
   h3 { font-size:1rem; margin:1.2rem 0 .4rem; }
   h4 { font-size:.95rem; margin:1rem 0 .3rem; }
-  p, li { font-size:.98rem; }
+  p, li { font-size:.98rem; overflow-wrap:anywhere; }
   code { background:var(--code); padding:.1rem .35rem; border-radius:4px;
          font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size:.9em; }
   pre { background:var(--code); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; font-size:.88rem; }
@@ -83,7 +83,7 @@
   <h2>现在做到哪一步</h2>
   <div class="note">
     截至 2026-10-12：<strong>M0–M5 已完成并通过本地数值验收</strong>（在 M0–M4 基础上，整体耦合的统一残差、完整耦合 Jacobian、整体 Newton 与伪时间定常推进已交付并验证；h=0.02 上分区与整体在收紧容差后得到一致离散解；其中一项物理门槛在该网格上按字面记为 failed，属网格分辨率限制，详见耦合章节）。
-    完整瞬态 FSI（FSI2）与 IQN-ILS 尚未实现；Krylov 预条件实用化、与时间事务/CLI 的衔接、最细网格整体稳态仍为计划。下面用三档标记，避免把计划当成成果。
+    M6/T24 已实现 FSI2 瞬态驱动、时间事务与 CLI，并通过小型真实有限元及真实 FSI2 网格三步一致性检查；M6/T25 已实现并验证 IQN-ILS 控制器（在 T18 线性有限元同离散上三种方法逐变量一致）。<strong>FSI2 稳定周期、网格/时间收敛与四算法公平比较尚未验证</strong>；Krylov 预条件实用化及最细网格整体稳态仍为计划。下面用三档标记，避免把计划当成成果。
   </div>
   <p>
     <span class="badge b-impl">已实现</span> 代码存在 ·
@@ -126,14 +126,24 @@
             <a href="../validation/t23.md">T23</a>、<a href="../validation/m5.md">M5 矩阵</a>、<a href="../development/m5_freeze.md">接口冻结</a></td>
       </tr>
       <tr>
-        <td>M5 剩余（计划）：Krylov 预条件实用化、时间事务/CLI 衔接、最细网格整体稳态与跨网格一致性</td>
+        <td>M5 剩余（计划）：Krylov 预条件实用化、最细网格整体稳态与跨网格一致性</td>
         <td><span class="badge b-plan">计划</span></td>
-        <td>无预条件 GMRES 在 264 个未知量上不收敛（<a href="../validation/t22.md">T22 §8</a>）；矩阵条目 22-04 保持 not_executed（<a href="../validation/m5.md">m5.md</a>）；未接入 CLI 与 <code>StepTransaction</code>；h=0.0075 未做整体推进（<a href="../validation/t23.md">T23 §11</a>）</td>
+        <td>无预条件 GMRES 在 264 个未知量上不收敛（<a href="../validation/t22.md">T22 §8</a>）；h=0.0075 未做整体推进（<a href="../validation/t23.md">T23 §11</a>）。M5 历史条目22-04为 not_executed；新的物理瞬态事务/CLI衔接证据见 <a href="../validation/t24.md">T24</a></td>
       </tr>
       <tr>
-        <td>M6 FSI2 瞬态、IQN-ILS、四种耦合算法公平比较与报告</td>
+        <td>M6/T24 FSI2 瞬态驱动、BDF1/BDF2、事务衔接与三步一致性</td>
+        <td><span class="badge b-ver">短程已验证</span></td>
+        <td>真实网格 Aitken/整体法最不利一致性比0.00722；短程周期结论 INCOMPLETE；<a href="../validation/t24.md">T24记录</a></td>
+      </tr>
+      <tr>
+        <td>M6/T25 IQN-ILS 控制器：历史管理、系数截断、暂停重启与失败重试</td>
+        <td><span class="badge b-ver">已验证（控制器）</span></td>
+        <td>T18 线性有限元同离散：fixed=27 / Aitken=7 / IQN-ILS=11 次评估，位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10；新增16项测试，全量回归600通过/2跳过；<a href="../development/t25_plan.md">T25计划</a>、<a href="../validation/t25.md">T25验收</a></td>
+      </tr>
+      <tr>
+        <td>M6 稳定周期与网格/时间收敛、四算法（fixed/Aitken/IQN-ILS/monolithic）比较与图表</td>
         <td><span class="badge b-plan">计划</span></td>
-        <td>—</td>
+        <td>IQN-ILS 控制器已可用（见上行），但长时 FSI2 周期、独立网格/时间研究与公平成本表尚未执行</td>
       </tr>
     </tbody>
   </table>
@@ -336,7 +346,21 @@
     <li><strong>Aitken 自适应</strong>：根据上一步残差自动调整 ω，公式为
       <code>ω(k) = −ω(k−1)·(r(k−1)·(r(k)−r(k−1))) / ||r(k)−r(k−1)||²</code>，
       并限制在 [0.05, 1] 内；分母退化时保留上一步系数并记录原因。</li>
+    <li><strong>IQN-ILS 拟牛顿加速（T25）</strong>：不只盯上一步，而是把过去若干步的界面变化和历史残差变化当作基向量，
+      用最小二乘构造逆 Jacobian 的近似更新。设 s(j)=x(j+1)−x(j) 为已走过的步，y(j)=r(j+1)−r(j) 为残差变化，
+      构造 V=[s(j)+ω₀·y(j)]，解最小二乘 V·α=−r(k)，再更新 x(k+1)=x(k)−V·α。
+      初始步（无历史）退为 ω₀·r(k)。当历史列线性相关（数值秩不足）、系数 |α|∞ 超过上限、
+      或 LS 残差相对过大时，清空历史并回退到初始步，记录原因后继续。这样既利用历史加速，又避免病态历史把迭代带偏。</li>
   </ul>
+  <p class="muted">
+    IQN-ILS 在 T18 线性有限元同离散上与 direct 解比较：固定松弛 27 次、Aitken 7 次、IQN-ILS 11 次评估，
+    三种方法的位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10。
+    本页只声称控制器本身在 T18 已验收；<strong>“哪种算法在 FSI2 上更快更稳”尚未验证</strong>，
+    需要在同一种瞬态离散下完成四算法公平比较（T26）。证据：
+    <a href="../development/t25_plan.md">T25 计划</a>、<a href="../validation/t25.md">T25 验收</a>、
+    源码 <a href="../../src/fsi_ice/coupling/partitioned.py">coupling/partitioned.py</a>、
+    测试 <a href="../../tests/test_iqn.py">test_iqn.py</a>。
+  </p>
   <p>
     收敛判据是<strong>未松弛的界面残差</strong>按显式物理尺度归一化后小于容差：
     <code>||G(x)−x||/scales ≤ atol + rtol·max(||x||/scales, ||G(x)||/scales)</code>。
@@ -558,9 +582,9 @@
   </p>
   <p>
     <strong>计划 / 未实现：</strong><span class="badge b-plan">计划</span>
-    Krylov 路径的预条件实用化（无预条件 GMRES 不收敛）、与时间事务（<code>StepTransaction</code>）的衔接（矩阵条目 22-04 保持 not_executed）、
-    CLI 子命令集成、最细网格上的整体稳态与跨网格一致性、FSI2 瞬态基准与 IQN-ILS（M6）。
-    这些内容没有本地验证证据，保持"计划"标记。
+    Krylov 路径的预条件实用化（无预条件 GMRES 不收敛）、最细网格上的整体稳态与跨网格一致性、FSI2 稳定周期与空间/时间收敛、
+    四算法（fixed/Aitken/IQN-ILS/monolithic）的公平成本比较。
+    这些内容没有本地验证证据，保持"计划"标记；IQN-ILS<strong>控制器</strong>已在 T25 验收，但其 FSI2 长时与成本比较仍在上述计划内。
   </p>
   <p class="muted">
     <strong>证据：</strong><a href="../development/m5_freeze.md">M5 接口冻结与裁决</a>、<a href="../validation/m5.md">M5 验收矩阵</a>、
@@ -575,13 +599,54 @@
     <a href="../../tests/test_m5_consistency.py">test_m5_consistency.py</a>。
   </p>
   <p>
-    <strong>FSI2 与算法比较（计划，M6）：</strong>FSI1 是稳态基准——流过圆柱的流体给弹性梁一个稳定推力；
+    <strong>FSI2 与算法比较（M6，进行中）：</strong>FSI1 是稳态基准——流过圆柱的流体给弹性梁一个稳定推力；
     FSI2 把它换成瞬态——流体让梁大幅振动、产生周期性响应，需要测<strong>稳定周期区间</strong>的位移振幅、阻力均值、主频等多项指标。
     <strong>IQN-ILS</strong> 是更聪明的分区加速：把过去若干步的界面残差当作"基向量"，用最小二乘预测下一步松弛量，
-    适合历史信息丰富、求解器每步代价不低的瞬态 FSI。
+    适合历史信息丰富、求解器每步代价不低的瞬态 FSI。T25 已交付并验收 IQN-ILS <strong>控制器</strong>（历史管理、系数截断、暂停重启、失败重试），
+    但尚未把它接入 FSI2 长时周期与成本表。
     M6 的目标是：用同一种瞬态离散，分别让<strong>固定松弛、Aitken、IQN-ILS 和整体 Newton</strong>跑同一道题，
     在物理误差相当的前提下比较它们的<strong>每步时间、组装耗时、迭代次数和失败步数</strong>——
     "正确"的方法之间才有资格谈"哪个更快更稳"。
+  </p>
+  <h3 id="fsi2-transient">让流体和梁一起随时间变化（T24）<span class="badge b-ver">短程已验证</span></h3>
+  <p>
+    可以把每个时间步想成一次试算：先拿到上一步已经接受的全部状态，再尝试计算下一个时刻。
+    FSI2 从静止开始，入口速度在前2秒平滑增加，避免突然冲击。固体密度是10000 kg/m³，
+    流体密度1000 kg/m³、平均入口速度1 m/s；材料、几何和单位采用官方定义，不能只把FSI1改名。
+  </p>
+  <p>
+    <strong>程序怎样做：</strong>分区法先猜梁的位移，由同一个时间公式得到梁速度，扩展流体网格，
+    解流体并把载荷传给梁，然后修正位移。整体法把这些未知量一起交给Newton求解。
+    两者共享物理残差和BDF模板；BDF2的第一步使用BDF1。迭代期间保持过去的状态不变，
+    收敛后重新检查全方程，全部检查通过才由 <code>StepTransaction</code> 一次接受三个场的历史。
+    如果求解或末端检查失败，就丢弃本次候选并记录原因，重试从同一个已接受状态出发。
+  </p>
+  <pre>BDF1: v(k) = [d(k) − d(k−1)] / Δt
+BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
+  <p>
+    d为梁位移（m），v为速度（m/s），Δt为时间步长（s）；网格运动速度也使用相同时间模板。
+    这保证界面运动关系一致；几何守恒仍由已有扫掠通量单独保证，不把运动速度当成扫掠面积差分。
+    力由圆柱和梁上的流体作用力相加得到，报告为单位深度N/m，厚度只计一次。
+  </p>
+  <p>
+    <strong>怎样验证：</strong>小型真实有限元问题以BDF1/BDF2推进三步，固定松弛、Aitken与整体法逐变量一致；
+    在已接受一步后注入求解、校验和prepare故障，确认历史不变且重试与基线逐位一致。
+    真实FSI2网格的三步Aitken/整体法对比也通过，全残差不超过1.122e-9，网格无翻转。
+    这只能证明启动与接线；t=0.03 s尚在入口启动阶段，报告为 <code>INCOMPLETE</code>，不代表周期基准通过。
+  </p>
+  <p>
+    <strong>稳定周期怎样判断：</strong>排除入口启动，在至少三个完整周期上检查周期、振幅和时间加权均值的变化均不超过2%。
+    峰值时刻用邻近三个采样点的二次插值确定，避免采样间隔造成频率量化误差；均值按时间积分，不用最大最小值的中点。
+    之后比较梁尖y振幅0.0816 m、频率1.93 Hz和阻力均值215.06 N/m，允许误差分别为10%、5%、10%。
+    波形不足或仍增长时保持INCOMPLETE。分析算法的测试采用合成波形，明确不是FSI2计算结果。
+  </p>
+  <p class="muted">
+    <strong>证据与入口：</strong><a href="../development/m6_t24_plan.md">T24冻结计划</a>、
+    <a href="../validation/t24.md">本地验证记录</a>、<a href="../../cases/fsi2.json">FSI2配置与来源</a>；
+    源码 <a href="../../src/fsi_ice/coupling/transient.py">coupling/transient.py</a>、
+    <a href="../../src/fsi_ice/validation/fsi2.py">validation/fsi2.py</a>；
+    测试 <a href="../../tests/test_fsi2.py">test_fsi2.py</a>。
+    完整周期、三网格/三步长收敛和四算法比较仍待验证；当前整体组装成本限制长时实验。
   </p>
   <p>
     <strong>证据：</strong><a href="../development/t18_plan.md">T18 计划</a>、<a href="../validation/t18.md">T18 记录</a>、
@@ -601,7 +666,7 @@
     <li><strong>守恒与对偶</strong>：质量收支、几何守恒（GCL）、界面虚功/功率、总力与总矩、作用力反作用力。</li>
     <li><strong>与公开参考比较</strong>：CSM/CFD/FSI1 数值对照 Turek–Hron 基准与 FeatFlow 官方结果，使用核验过的来源与单位。</li>
     <li><strong>重复性与失败注入</strong>：重复运行逐位一致；人为制造失败验证回滚与重试等价于冷启动；失败不保留旧 PASS。</li>
-    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行全部测试（M5 冻结状态为 557 项通过、2 项跳过；本页维护不重跑数值测试），相关领域另跑专项回归。</li>
+    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行相关测试；M6/T24本轮全量584项通过、2项跳过（M5冻结状态为557项通过、2项跳过）。仅文档维护不必重跑数值测试。</li>
   </ul>
   <p>
     每项功能的验证日期、命令、环境、参数、预期标准、实测结果与结论记录在
@@ -617,11 +682,17 @@
     <a href="../../requirements.txt">requirements.txt</a>；重建说明见 <a href="../environment.md">环境记录</a>）。
     常用命令（在项目根目录）：
   </p>
-  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（M5 冻结状态 557 通过、2 跳过）
+  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（当前600通过、2跳过）
 .venv/bin/python -m fsi_ice poisson    --config cases/poisson_sine.json --output results/poisson
 .venv/bin/python -m fsi_ice single-fields --config cases/single_fields.json --output results/single_fields
 .venv/bin/python -m fsi_ice partitioned-check --config cases/partitioned_check.json --output results/t18/check
-.venv/bin/python -m fsi_ice fsi1       --config cases/fsi1.json --output results/t20/fsi1</pre>
+.venv/bin/python -m fsi_ice partitioned-check --config cases/iqn_check.json --output results/t25/iqn
+.venv/bin/python -m fsi_ice fsi1       --config cases/fsi1.json --output results/t20/fsi1
+.venv/bin/python -m fsi_ice fsi2       --config cases/fsi2.json --output results/m6/fsi2 --mesh-size 0.03 --end-time 0.03</pre>
+  <p class="muted">
+    <code>partitioned-check</code> 可用 <code>--method fixed|aitken|iqn</code> 覆盖配置中的算法选择；
+    <code>cases/iqn_check.json</code> 为 IQN-ILS 的冻结配置。
+  </p>
   <p>
     <code>csm3</code>、<code>cfd3</code> 为动态基准（三套网格、三个步长，耗时较长），支持
     <code>--postprocess-only</code> 从已保存监测数据重新汇总；CFD 基准网格生成需要外部 <strong>Gmsh CLI</strong>（本机 4.12），
@@ -631,6 +702,7 @@
   <p class="muted">
     数值结果解释：测试通过 ≠ 物理精度已验证。验收是否通过以各算例 <code>report.json</code> 的
     <code>status</code>/<code>checks</code> 和 <a href="../validation/">验证记录</a>为准。
+    FSI2短程返回INCOMPLETE、退出码3；配置/求解失败为2、周期参考门槛失败为1、全部通过才为0。
   </p>
 </section>
 
@@ -639,6 +711,20 @@
   <table>
     <thead><tr><th>日期</th><th>章节</th><th>变化</th><th>证据</th></tr></thead>
     <tbody>
+      <tr>
+        <td>2026-10-12</td>
+        <td>M6状态、耦合、更新记录</td>
+        <td>第 4 次维护：把 IQN-ILS 从“计划”更新为“已验证（控制器）”——新增分区耦合小节中的 IQN-ILS 条目，说明 V·α=−r 最小二乘更新、初始步、秩亏/α 截断/LS 残差重启与失败重试，并区分“控制器已验收”与“FSI2 四算法公平比较仍待验证”；
+            状态说明与表格新增 T25 行，将 M6 剩余行收紧为“稳定周期/网格时间收敛/四算法比较”。</td>
+        <td><a href="../development/t25_plan.md">t25_plan.md</a>、<a href="../validation/t25.md">t25.md</a>：新增16项测试、全量回归600通过/2跳过（M5冻结基线584 + T25新增16）；本次仅文档维护：HTML标签平衡、本地 href/src/fragment 锚点检查、UTF-8无乱码，未改动求解逻辑与数值测试</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td>
+        <td>M6状态、瞬态耦合、运行入口</td>
+        <td>接入FSI2 BDF瞬态驱动与全场事务；解释运动关系、接受/回滚、周期统计与INCOMPLETE状态。
+            保留完整周期与IQN-ILS等待办，短程证据不替代基准精度。</td>
+        <td><a href="../validation/t24.md">T24记录</a>：专项27项通过、最终全量584项通过/2项跳过，真实FSI2两路线三步一致。新增物理门控不能被覆盖或以NaN容差绕过；136条本地链接、结构与锚点通过，1280/390视口检查中修复长内联代码撑宽段落。</td>
+      </tr>
       <tr>
         <td>2026-10-11</td>
         <td>全部</td>

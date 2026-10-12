@@ -34,13 +34,19 @@ class CouplingOptions:
     minimum_relaxation: float = 0.05
     maximum_relaxation: float = 1.0
     aitken_denominator_tolerance: float = 1e-14
+    iqn_initial_relaxation: float = 1.0
+    iqn_alpha_max: float = 10.0
+    iqn_history_size: int = 0
+    iqn_restart_tolerance: float = 1e-2
 
     def __post_init__(self):
-        extra_scalars = ("minimum_relaxation", "maximum_relaxation", "aitken_denominator_tolerance")
-        for name in ("relaxation", "absolute_tolerance", "relative_tolerance", *extra_scalars):
+        base_scalars = ("relaxation", "absolute_tolerance", "relative_tolerance",
+                        "minimum_relaxation", "maximum_relaxation", "aitken_denominator_tolerance")
+        iqn_scalars = ("iqn_initial_relaxation", "iqn_alpha_max", "iqn_restart_tolerance")
+        for name in (*base_scalars, *iqn_scalars):
             value = getattr(self, name)
             if isinstance(value, (bool, np.bool_)) or not np.isscalar(value) or \
-                    (name in extra_scalars and isinstance(value, (str, bytes, complex, np.complexfloating))):
+                    isinstance(value, (str, bytes, complex, np.complexfloating)):
                 raise ValueError(f"{name} must be a finite real scalar.")
             try:
                 value = float(value)
@@ -59,14 +65,23 @@ class CouplingOptions:
             raise ValueError("max_iterations must be a positive integer.")
         if not isinstance(self.case_name, str) or not self.case_name.strip():
             raise ValueError("case_name must be a nonempty string.")
-        if not isinstance(self.method, str) or self.method not in ("fixed", "aitken"):
-            raise ValueError("method must be 'fixed' or 'aitken'.")
+        if not isinstance(self.method, str) or self.method not in ("fixed", "aitken", "iqn"):
+            raise ValueError("method must be 'fixed', 'aitken' or 'iqn'.")
         if not 0 < self.minimum_relaxation <= self.maximum_relaxation:
             raise ValueError("Relaxation bounds must satisfy 0 < minimum_relaxation <= maximum_relaxation.")
         if self.aitken_denominator_tolerance <= 0:
             raise ValueError("aitken_denominator_tolerance must be strictly positive.")
         if self.method == "aitken" and not self.minimum_relaxation <= self.relaxation <= self.maximum_relaxation:
             raise ValueError("Aitken requires minimum_relaxation <= relaxation <= maximum_relaxation.")
+        if not 0 < self.iqn_initial_relaxation <= 1:
+            raise ValueError("iqn_initial_relaxation must lie in (0,1].")
+        if self.iqn_alpha_max <= 0:
+            raise ValueError("iqn_alpha_max must be strictly positive.")
+        if isinstance(self.iqn_history_size, (bool, np.bool_)) or \
+                not isinstance(self.iqn_history_size, (int, np.integer)) or self.iqn_history_size < 0:
+            raise ValueError("iqn_history_size must be a nonnegative integer.")
+        if self.iqn_restart_tolerance <= 0:
+            raise ValueError("iqn_restart_tolerance must be strictly positive.")
 
 
 @dataclass(frozen=True)
@@ -134,6 +149,26 @@ class CouplingIteration:
     relaxation_reason: str = "fixed"
 
 
+def _iqn_max_alpha(alpha):
+    """Maximum absolute alpha coefficient, or ``-∞`` for an empty vector."""
+    if alpha.size == 0:
+        return -np.inf
+    return float(np.max(np.abs(alpha)))
+
+
+def _iqn_solve(V, rhs):
+    """Return ``(alpha, used_columns, ls_residual_norm)`` for the LS problem
+    V·α = rhs. ``used_columns`` is the LS-reported numerical rank, which may
+    be less than the column count when V is rank-deficient.
+    """
+    alpha, residuals, rank, _ = np.linalg.lstsq(V, rhs, rcond=None)
+    if residuals.size:
+        ls_residual = float(np.sqrt(residuals[0]))
+    else:
+        ls_residual = float(np.linalg.norm(V @ alpha - rhs))
+    return alpha, int(rank), ls_residual
+
+
 @dataclass(frozen=True)
 class CouplingResult:
     interface_values: np.ndarray
@@ -167,6 +202,15 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
     the last coefficient; a non-finite calculation fails with diagnostics.
     History relaxation describes the outgoing update, except terminal rows,
     which retain the last coefficient and never apply an unassessed update.
+
+    For ``method='iqn'`` the update is x_{k+1} = x_k − V_k·α_k where V_k has
+    columns v_j = s_j + ω_0·y_j, α_k solves V_k·α = −r_k in the least-squares
+    sense, and ω_0 = ``iqn_initial_relaxation``. Iteration 1 has no history and
+    falls back to ω_0·r_k. Restart clears the stored pairs and falls back to
+    the same ω_0·r_k step. Restart fires when LS reports a numerically
+    rank-deficient V, any α exceeds ``iqn_alpha_max``, or the relative LS
+    residual exceeds ``iqn_restart_tolerance``. The capped history length is
+    ``iqn_history_size`` (0 = unbounded, capped at ``max_iterations−1``).
     """
     if not callable(evaluate):
         raise TypeError("evaluate must be callable.")
@@ -180,6 +224,9 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
     history = []
     previous_scaled_residual = None
     relaxation = options.relaxation
+    iqn_omega0 = options.iqn_initial_relaxation
+    iqn_pending = None  # (s_j, r_j) for the just-applied update at iteration j
+    iqn_history = []  # list of (s_j, y_j) promoted once r_{j+1} is known.
     for iteration in range(1, options.max_iterations + 1):
         stage = "evaluate"
         try:
@@ -208,7 +255,19 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
             history.append(CouplingIteration(iteration, norm, threshold, relaxation, residual, "max_iterations"))
             raise CouplingFailure(options.case_name, iteration, "convergence", "maximum iterations exceeded",
                                   values, history)
+        # Promote the pending pair into history once both (s_j, r_j) and r_{j+1}
+        # are available. y_j = r_{j+1} − r_j.
+        if iqn_pending is not None:
+            s_j, r_j = iqn_pending
+            iqn_pending = None
+            if options.method == "iqn":
+                y_j = residual - r_j
+                if np.all(np.isfinite(y_j)):
+                    iqn_history.append((s_j, y_j))
+                    if options.iqn_history_size and len(iqn_history) > options.iqn_history_size:
+                        iqn_history = iqn_history[-options.iqn_history_size:]
         relaxation_reason = "fixed"
+        applied_update = None  # If not None, overrides omega*(residual).
         if options.method == "aitken":
             relaxation_reason = "initial"
             scaled_residual = residual / scales
@@ -237,10 +296,45 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
                                                options.maximum_relaxation))
                     relaxation_reason = "clipped" if relaxation != coefficient else "aitken"
             previous_scaled_residual = scaled_residual
+        elif options.method == "iqn":
+            if not iqn_history:
+                relaxation = iqn_omega0
+                relaxation_reason = "iqn_initial"
+            else:
+                V = np.column_stack([s_j + iqn_omega0*y_j for s_j, y_j in iqn_history])
+                try:
+                    alpha, used, ls_residual = _iqn_solve(V, -residual)
+                except (np.linalg.LinAlgError, ValueError) as error:
+                    history.append(CouplingIteration(iteration, norm, threshold, iqn_omega0, residual,
+                                                     "iqn_restart"))
+                    raise CouplingFailure(options.case_name, iteration, "relaxation",
+                                          f"IQN-ILS linear solve failed: {error}", values, history) from error
+                alpha_inf = _iqn_max_alpha(alpha)
+                reference_scale = max(norm, magnitude, np.finfo(float).tiny)
+                restart = (used < len(iqn_history)
+                           or not np.isfinite(alpha_inf)
+                           or alpha_inf > options.iqn_alpha_max
+                           or (ls_residual > 0
+                               and ls_residual / reference_scale > options.iqn_restart_tolerance))
+                if restart:
+                    relaxation = iqn_omega0
+                    relaxation_reason = "iqn_restart"
+                    iqn_history = []
+                else:
+                    relaxation = alpha_inf
+                    relaxation_reason = "iqn"
+                    applied_update = V @ alpha
         history.append(CouplingIteration(iteration, norm, threshold, relaxation, residual, relaxation_reason))
         try:
             with np.errstate(over="raise", invalid="raise"):
-                next_values = _vector(values + relaxation*residual, "relaxed interface input")
+                if applied_update is None:
+                    next_values = _vector(values + relaxation*residual, "relaxed interface input")
+                else:
+                    next_values = _vector(values - applied_update, "IQN-ILS interface input")
         except Exception as error:
             raise CouplingFailure(options.case_name, iteration, "relaxation", str(error), values, history) from error
+        if options.method == "iqn":
+            # Store (s, r) for the just-applied update; the next iteration forms
+            # y = r_{next} − r once r_{next} is computed and promotes the pair.
+            iqn_pending = (next_values - values, residual)
         values = next_values

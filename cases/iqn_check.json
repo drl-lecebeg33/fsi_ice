@@ -1,0 +1,20 @@
+{
+  "case": "partitioned_check",
+  "mesh": [3, 2],
+  "dt": 0.1,
+  "solid": {"young": 300.0, "poisson": 0.3, "density": 2.0, "body_force_y": -0.02},
+  "fluid": {"viscosity": 0.1, "density": 1.0, "lid_velocity": 0.05},
+  "coupling": {
+    "method": "iqn",
+    "relaxation": 0.5,
+    "absolute_tolerance": 1e-11,
+    "relative_tolerance": 1e-9,
+    "max_iterations": 150,
+    "iqn_initial_relaxation": 0.5,
+    "iqn_alpha_max": 10.0,
+    "iqn_history_size": 10,
+    "iqn_restart_tolerance": 1e-2
+  },
+  "scales": {"displacement": 0.01, "velocity": 0.1, "pressure": 1.0, "load": 1.0},
+  "acceptance": {"direct_difference_max": 1e-8, "residual_max": 1e-9, "motion_error_max": 1e-9, "continuity_max": 1e-10}
+}

@@ -1,4 +1,10 @@
-"""FSI2 trajectory driver; short runs are INCOMPLETE, never periodic PASS."""
+"""FSI2 trajectory driver; short runs are INCOMPLETE, never periodic PASS.
+
+中文说明：本模块驱动 FSI2 瞬态轨迹：按 order/method 逐时间步推进并记录监测序列，
+再对启动后（t>=2）的末段信号做周期统计。若缺乏足够已解出的完整周期或周期尚未稳定，
+状态记为 INCOMPLETE（绝不误报为周期 PASS）；仅当周期稳定且幅值/频率/阻力均值均通过
+冻结参考门槛时才算 PASS。
+"""
 
 import json
 import hashlib
@@ -19,12 +25,21 @@ from fsi_ice.validation.fsi1 import SteadyFSI1Problem
 
 
 def inflow_factor(time):
+    """入口速度平滑斜坡因子：t<2 时为 (1-cos(pi*t/2))/2，t>=2 后恒为 1。
+
+    用于消除入口流量阶跃、平稳启动；时间须有限且非负。
+    """
     if not np.isfinite(time) or time < 0:
         raise ValueError("Inlet time must be finite and nonnegative.")
     return float((1-np.cos(np.pi*time/2))/2) if time < 2 else 1.
 
 
 def validate_fsi2_config(config):
+    """校验并返回 FSI2 配置；任何非法或"放水"的设置都会抛 ValueError。
+
+    除 schema 与正数检查外，还强制：end_time 为 dt 的整数倍、流体/固体材料为标准
+    FSI2 原始参数（改材料属于另行命名的派生算例）、接受阈值不得超过冻结上限。
+    """
     required = {"case", "mesh_size", "dt", "end_time", "order", "method", "fluid", "solid",
                 "coupling", "solver", "acceptance", "reference", "provenance"}
     if not isinstance(config, dict) or set(config) != required or config["case"] != "fsi2":
@@ -60,6 +75,7 @@ def validate_fsi2_config(config):
         raise ValueError("Invalid solver controls.")
     NewtonOptions(atol=solver["newton_atol"], rtol=solver["newton_rtol"], max_iterations=solver["max_iterations"])
     acceptance = config["acceptance"]
+    # 各阈值存在冻结上限，防止通过放宽验收阈值来伪造通过。
     limits = {"residual_max": 1e-7, "continuity_max": 1e-10,
         "period_variation_max": .02, "amplitude_variation_max": .02, "mean_variation_max": .02,
         "tip_y_amplitude_relative_max": .1, "frequency_relative_max": .05, "drag_mean_relative_max": .1}
@@ -68,6 +84,7 @@ def validate_fsi2_config(config):
             any(acceptance[name] > value for name, value in limits.items()) or \
             not .1 <= acceptance["minimum_mesh_quality"] <= 1:
         raise ValueError("Invalid acceptance controls or weakened frozen gate.")
+    # 参考量必须与已验证的冻结目标（来源见 provenance）完全一致。
     if config["reference"] != {"tip_y_amplitude": .0816, "frequency": 1.93, "drag_mean": 215.06}:
         raise ValueError("FSI2 reference must match the verified frozen targets.")
     if not isinstance(config["provenance"], dict) or not {"url", "verified_on", "table"} <= config["provenance"].keys():
@@ -80,7 +97,13 @@ def load_fsi2_config(path):
 
 
 def cycle_statistics(times, signal, *, prominence, cycles=3):
-    """Last complete peak-to-peak cycles; means are time-weighted, not midranges."""
+    """Last complete peak-to-peak cycles; means are time-weighted, not midranges.
+
+    中文：对信号末尾 cycles 个完整峰-峰周期做统计：find_peaks 找峰后对每个峰用二次
+    多项式拟合微调峰时刻，再计算周期、幅值（半峰-峰）与时间加权均值（用梯形积分除以
+    周期，而非简单中点）。样本须有限、时间严格递增；峰数不足 cycles+1 时返回
+    {"resolved": False}。
+    """
     times, signal = np.asarray(times, dtype=float), np.asarray(signal, dtype=float)
     if times.ndim != 1 or signal.shape != times.shape or len(times) < 3 or \
             not np.all(np.isfinite(times)) or not np.all(np.isfinite(signal)) or np.any(np.diff(times) <= 0):
@@ -113,7 +136,14 @@ def cycle_statistics(times, signal, *, prominence, cycles=3):
 
 
 def analyze_fsi2(rows, config):
+    """对监测序列做周期分析并对照参考门槛，返回状态字典。
+
+    rows 为逐时刻监测记录；仅取 t>=2 的末段（跳过启动瞬态）。状态语义：样本或完整
+    周期不足、或周期尚未稳定时返回 "INCOMPLETE"；待周期稳定后，按 tip_y 幅值/频率、
+    drag 均值相对误差给出 "PASS"/"FAIL"。drag 均值在一个完整 tip_y 周期窗口上积分。
+    """
     late = [row for row in rows if row["time"] >= 2.]
+    # t<2 视为启动瞬态，样本太短无法判定周期性。
     if len(late) < 3:
         return {"status": "INCOMPLETE", "reason": "No post-startup periodic window", "checks": {}}
     times = [row["time"] for row in late]
@@ -122,6 +152,7 @@ def analyze_fsi2(rows, config):
     if not all(stat["resolved"] for stat in stats.values()):
         return {"status": "INCOMPLETE", "reason": "Insufficient resolved complete cycles", "statistics": stats, "checks": {}}
     acceptance = config["acceptance"]
+    # 周期/幅值/均值的相对波动均须落在阈值内，才认为响应已进入稳定周期。
     stable = all(stat[key] <= acceptance[key+"_max"] for stat in stats.values()
                  for key in ("period_variation", "amplitude_variation", "mean_variation"))
     if not stable:
@@ -141,6 +172,11 @@ def analyze_fsi2(rows, config):
 
 
 def build_fsi2_problem(config, output):
+    """基于 FSI1 网格/材料搭建 FSI2 瞬态驱动，并注册每步的监测回调。
+
+    监测回调组装当前网格上的 Stokes 算子，把圆柱力与界面载荷相加得到合力，输出监测点
+    tip_x/tip_y（m）与阻力/升力（N/m）。
+    """
     problem = SteadyFSI1Problem(config, config["mesh_size"], Path(output)/"mesh")
 
     def monitor(view, blocks):
@@ -162,11 +198,17 @@ def build_fsi2_problem(config, output):
 
 
 def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=None, progress=print):
-    """Fresh trajectory. Does not resume/reuse old solution files implicitly."""
+    """Fresh trajectory. Does not resume/reuse old solution files implicitly.
+
+    中文：CLI 入口每次从全新轨迹开始，先删旧产物，不隐式续算或复用旧解文件。可选参数
+    method/end_time/mesh_size 覆盖配置后再次校验。失败时删除 report.json/solution.npz
+    并写 failure.json（记录 stage 与已接受步数）后重抛。
+    """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     for name in ("report.json", "failure.json", "monitor.csv", "solution.npz"):
         (output/name).unlink(missing_ok=True)
+    # stage 记录当前阶段，供失败诊断；INCOMPLETE 是与 PASS/FAIL 并列的状态语义。
     stage, driver, config = "input", None, None
     try:
         config = load_fsi2_config(config_path)
@@ -198,6 +240,7 @@ def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=N
                             pressure=state.pressure, mesh_displacement=state.mesh_displacement,
                             interface_g=state.interface["g"], mesh_velocity=state.mesh_velocity,
                             time=state.time, step=state.step)
+        # write_report 只区分 PASS/FAIL，此处随后用分析状态覆盖以保留 INCOMPLETE 语义。
         report = write_report(output, "fsi2", config, analysis,
             {"periodic_validation_complete": analysis["status"] != "INCOMPLETE", **analysis["checks"]}, {
             "scope": "physical trajectory; PASS requires stable cycles and reference gates",

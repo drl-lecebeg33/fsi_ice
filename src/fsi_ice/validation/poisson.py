@@ -1,4 +1,9 @@
-"""Manufactured solution u=sin(pi*x) sin(pi*y) on the unit square."""
+"""Manufactured solution u=sin(pi*x) sin(pi*y) on the unit square.
+
+中文说明：本模块用制造解 u=sin(pi x)sin(pi y)（单位方域，-laplacian(u)=2*pi^2*u）
+验证 P1 有限元 Poisson 求解器：多档网格上计算 L2 与 H1 半范数误差、估计收敛阶，并写出
+convergence.csv、solution.npz、poisson.png 与 report.json（含 Asia/Shanghai 时间戳与代码版本）。
+"""
 
 from dataclasses import dataclass
 import csv
@@ -19,6 +24,8 @@ from fsi_ice.mesh import rectangle_mesh
 
 @dataclass(frozen=True)
 class PoissonConfig:
+    """Poisson 收敛验证配置：网格档、验收收敛阶与残差阈值（均为有限正数）。"""
+
     mesh_levels: tuple[int, ...] = (8, 16, 32)
     l2_order_min: float = 1.8
     h1_order_min: float = 0.9
@@ -37,6 +44,7 @@ class PoissonConfig:
 
     @classmethod
     def from_file(cls, path):
+        """从 JSON 读取配置；要求恰含 case/mesh_levels/acceptance 且 case=="poisson_sine"。"""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict) or set(data) != {"case", "mesh_levels", "acceptance"}:
             raise ValueError("Config must contain exactly case, mesh_levels and acceptance.")
@@ -52,6 +60,7 @@ class PoissonConfig:
         return cls(tuple(data["mesh_levels"]), **acceptance)
 
     def as_dict(self):
+        """导出为可写回 JSON 的字典（含 case 与验收阈值）。"""
         return {"case": "poisson_sine", "mesh_levels": list(self.mesh_levels), "acceptance": {
             "l2_order_min": self.l2_order_min, "h1_order_min": self.h1_order_min,
             "residual_max": self.residual_max,
@@ -59,19 +68,23 @@ class PoissonConfig:
 
 
 def exact_solution(points):
+    """制造解 u=sin(pi x)sin(pi y)，在单位方域四边为零（齐次 Dirichlet）。"""
     return np.sin(np.pi * points[:, 0]) * np.sin(np.pi * points[:, 1])
 
 
 def exact_gradient(points):
+    """制造解梯度 grad(u)=(pi cos(pi x)sin(pi y), pi sin(pi x)cos(pi y))。"""
     x, y = np.pi * points[:, 0], np.pi * points[:, 1]
     return np.pi * np.column_stack((np.cos(x) * np.sin(y), np.sin(x) * np.cos(y)))
 
 
 def source(points):
+    """右端项 f=-laplacian(u)=2*pi^2*u，使制造解精确满足 -laplacian(u)=f。"""
     return 2 * np.pi**2 * exact_solution(points)
 
 
 def code_metadata():
+    """收集代码版本信息：当前 commit 与工作树是否干净（无 git 时返回不可用标记）。"""
     root = Path(__file__).resolve().parents[3]
     if not (root / ".git").exists():
         return {"commit": None, "working_tree": "unavailable"}
@@ -83,6 +96,12 @@ def code_metadata():
 
 
 def run_convergence(config: PoissonConfig, output: Path, *, plot=True):
+    """在 config.mesh_levels 上跑收敛验证并写出报告，返回报告字典。
+
+    逐档解 P1 Poisson 并测 L2/H1 半范数误差与相对残差（h 为最大单元边长），由相邻两档
+    估计收敛阶；验收检查阶次、残差与误差单调下降，并写出 convergence.csv、solution.npz、
+    poisson.png 与 report.json。
+    """
     rows = []
     for level in config.mesh_levels:
         mesh = rectangle_mesh(level)
@@ -92,12 +111,14 @@ def run_convergence(config: PoissonConfig, output: Path, *, plot=True):
                "h": mesh.h, **errors, "relative_residual": solution.relative_residual,
                "minimum_quality": float(mesh.quality.min()), "l2_order": None, "h1_order": None}
         if rows:
+            # 收敛阶 = log(e_prev/e_now) / log(h_prev/h_now)；h 减半时即 log2 比值。
             previous = rows[-1]
             ratio = np.log(previous["h"] / row["h"])
             row["l2_order"] = float(np.log(previous["l2"] / row["l2"]) / ratio)
             row["h1_order"] = float(np.log(previous["h1_seminorm"] / row["h1_seminorm"]) / ratio)
         rows.append(row)
     checks = {
+        # 首行无前一行、阶次为 None，故只从第二行起检查阶次门槛。
         "l2_order": all(row["l2_order"] >= config.l2_order_min for row in rows[1:]),
         "h1_order": all(row["h1_order"] >= config.h1_order_min for row in rows[1:]),
         "linear_residual": all(row["relative_residual"] <= config.residual_max for row in rows),
@@ -135,6 +156,7 @@ def run_convergence(config: PoissonConfig, output: Path, *, plot=True):
 
 
 def save_plot(mesh, values, rows, path):
+    """保存三联图：P1 数值解、节点误差、以及实测收敛曲线（含 h^2 / h 参考斜率）。"""
     import matplotlib
 
     matplotlib.use("Agg")

@@ -94,8 +94,38 @@ conventions apply.
 Every returned object is read-only: ``x``, ``residual`` and ``scales`` are
 frozen copies, iteration and step records are tuples and mappings are exposed
 through ``MappingProxyType``.
+
+中文说明
+--------
+
+本模块把 T21 的整体耦合求值契约（:func:`fsi_ice.coupling.monolithic.evaluate_monolithic`）
+接到通用阻尼 Newton 原型（:mod:`fsi_ice.coupling.newton`）上，并加上把瞬态 BDF 步残差推到
+定常不动点的"伪时间推进"。
+
+关键约定：
+
+* **切线路线显式选择**：``jacobian_mode`` 取 ``"assembled"``（默认，接受点额外一次
+  ``mode="assembled"`` 求值得到完整 Jacobian，用 splu 直接分解）或 ``"jvp"``（矩阵无关
+  ``LinearOperator``，每次矩阵-向量乘调一次 ``mode="jvp"``，用 GMRES）。路线绝不隐式切换、
+  也不回退，不可用或失败一律抛 :class:`MonolithicNewtonFailure`。
+* **界面相容性**：T21 残差域要求 ``d_m|Gamma = H_d d_s|Gamma``（一一参考匹配，``H_d = I``）。
+  约束行线性，故可行 ``x0`` 经任意 Newton 步仍可行。``solve_monolithic_step`` 在求解前检查
+  间隙：``compatibility="require"``（默认）违反即结构化报错；``compatibility="project"`` 则把
+  网格迹投影到固体迹（:func:`project_interface_compatibility`）。策略前的间隙记录在结果与失败
+  上。
+* **伪时间定常推进**：:func:`march_to_steady` 从模板上下文的最近已接受状态出发，为各场新建
+  ``BDFHistory``，用恒定 ``dt`` 逐步推进（``order=2`` 用 BDF1 启动）。每步收敛后接受为下一条
+  历史，``generation``/``step_id`` 加一，并以
+  ``candidate_id = (template.candidate_id, "march", step)`` 建新上下文；模板及其数组不被修改。
+  停机判据是收敛步的缩放 BDF 时间项：``max_block max_i |a_0 x_i + sum_{j>=1} a_j x_i^{k-j}| / S_i
+  <= steady_tolerance``，只对含时间导数的块 ``u_f``、``d_s``、``v_s`` 取，``S`` 为该块物理尺度
+  （无量纲，数值上量纲为 1/s 的"相对状态变化率"）。在真不动点处 BDF 时间项相消
+  （``sum_j a_j = 0``），残差即为定常离散方程。
+* **代价统计**：:class:`MonolithicCounters` 用 T23 冻结字段名并附各模式细分；
+  ``linear_iterations`` 在直接分解路线上为 0、在 GMRES 路线上计入内迭代；所有返回对象只读。
 """
 
+# 说明：以上为模块 docstring 的一部分（因此 "from __future__" 仍是其后第一条语句）。
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
@@ -126,12 +156,15 @@ __all__ = [
 ]
 
 #: Explicit tangent routes of the monolithic adapter; no other value is accepted.
+# 中文：切线路线仅此两种，显式选择、不隐式推断，也不回退。
 JACOBIAN_MODES = ("assembled", "jvp")
 
 #: State blocks that carry a BDF time derivative in the monolithic residual.
+# 中文：整体残差中带 BDF 时间导数的状态块（定常判据只对这些块取时间项）。
 TIME_TERM_BLOCKS = ("u_f", "d_s", "v_s")
 
 #: Compatibility policies of the step driver.
+# 中文：步进驱动的界面相容性策略：require=违反即报错，project=先投影网格迹到固体迹。
 COMPATIBILITY_POLICIES = ("require", "project")
 
 
@@ -146,6 +179,13 @@ class MonolithicCounters:
     with the direct factorization, marked by the result's ``linear_solver``);
     ``failed_trials`` are rejected line-search trials and ``failed_steps`` the
     failed steps (1 when a step failed, 0 otherwise).
+
+    中文：一步或一次推进的工作量计数器（先按 T23 §4.1 冻结字段名）。``steps`` 为完成的推进
+    步数（单步求解为 1）；``newton_iterations`` 为不含起始记录的已接受 Newton 迭代数；
+    ``evaluations`` 为全部整体求值调用次数并细分为 residual/assembled/jvp；``jvp_directions``
+    为提交给 ``mode="jvp"`` 的方向数；``linear_iterations`` 为 GMRES 内迭代数（直接分解路线为 0，
+    由结果的 ``linear_solver`` 标记）；``failed_trials`` 为被拒绝的线搜索试验，``failed_steps``
+    为失败步数（失败为 1，否则 0）。``as_dict`` 返回普通整数字典。
     """
 
     steps: int = 0
@@ -179,7 +219,11 @@ class MonolithicCounters:
 
 
 class _Accounting:
-    """Mutable work/timing accumulator of one step; never shared across runs."""
+    """Mutable work/timing accumulator of one step; never shared across runs.
+
+    中文：单步（或单次推进）的可变工作量/计时累加器，每次运行独立创建、不跨运行共享；
+    ``absorb_telemetry`` 把通用 Newton 原型返回的局部计数与计时并入本累加器。
+    """
 
     def __init__(self):
         for entry in fields(MonolithicCounters):
@@ -221,6 +265,12 @@ class MonolithicNewtonFailure(NewtonFailure):
     ``counters``/``timings``, the failing march ``step_index`` and the completed
     ``march_steps`` records.  ``StepTransaction`` forwards ``diagnostics``
     unchanged, so the exception can be raised from a plan callback as is.
+
+    中文：由 ``newton.NewtonFailure`` 派生、附加 T22 上下文的失败异常。沿用原型的冻结阶段
+    列表（``evaluate``/``residual``/``jacobian``/``linear_solve``/``line_search``/
+    ``convergence``），并加入：上下文 ``candidate_id``（以 ``repr`` 存储）、显式
+    ``jacobian_mode``、界面相容间隙、逐块缩放残差范数、部分 ``counters``/``timings``、失败的
+    推进 ``step_index`` 与已完成 ``march_steps`` 记录；这些上下文同时并入 ``diagnostics``。
     """
 
     def __init__(self, *, phase, iteration, reason, residual_norm=None, raw_residual_norm=None,
@@ -258,7 +308,11 @@ class MonolithicNewtonFailure(NewtonFailure):
 
     @classmethod
     def from_failure(cls, failure, **extra):
-        """Copy a :class:`NewtonFailure` into this class, adding T22 context."""
+        """Copy a :class:`NewtonFailure` into this class, adding T22 context.
+
+        中文：把通用原型抛出的 :class:`NewtonFailure` 复制成本类，并附加 T22 上下文
+        （``extra`` 关键字如 ``candidate_id``/``jacobian_mode``/``counters`` 等）。
+        """
         if not isinstance(failure, NewtonFailure):
             raise TypeError("failure must be a NewtonFailure instance.")
         return cls(phase=failure.phase, iteration=failure.iteration, reason=failure.reason,
@@ -267,7 +321,11 @@ class MonolithicNewtonFailure(NewtonFailure):
 
 
 def _finite_vector(values, size, name):
-    """Independent read-only finite 1-D float array or ``ValueError``."""
+    """Independent read-only finite 1-D float array or ``ValueError``.
+
+    中文：把输入复制成独立、只读、有限的长度 ``size`` 一维浮点数组，作为不共享内存的防御性
+    拷贝；形状不符或含非有限值时抛出 ``ValueError`` 并带上 ``name``。
+    """
     try:
         array = np.array(values, dtype=float, copy=True)
     except (TypeError, ValueError, OverflowError):
@@ -281,6 +339,7 @@ def _finite_vector(values, size, name):
 
 
 def _validated_scales(scales, size):
+    # 缩放因子缺省为全 1；必须严格为正，用作收敛判据 atol + rtol*||r0||_S 的分量权重。
     if scales is None:
         scale = np.ones(size)
         scale.setflags(write=False)
@@ -292,6 +351,7 @@ def _validated_scales(scales, size):
 
 
 def _validated_x0(x0, context):
+    # 校验起点候选 x0：形状须等于布局总长，且必须有限；非有限时以结构化失败抛出。
     try:
         values = np.array(x0, dtype=float, copy=True)
     except (TypeError, ValueError, OverflowError):
@@ -308,7 +368,10 @@ def _validated_x0(x0, context):
 
 
 def _interface_scales(x, context):
-    """Reference/current coordinate magnitudes of the wet trace (gap tolerance)."""
+    """Reference/current coordinate magnitudes of the wet trace (gap tolerance).
+
+    中文：返回湿界面迹的参考/当前坐标量级（米），供相容间隙容差 ``atol + rtol*scale`` 使用。
+    """
     blocks = context.layout.unpack(x)
     d_s = np.asarray(blocks["d_s"]).ravel()[context.topology.solid_dofs]
     d_m = np.asarray(blocks["d_m"]).ravel()[context.layout.mesh_interface_dofs]
@@ -329,6 +392,10 @@ def interface_compatibility_gap(x, *, context):
     The T21 wet mesh rows are ``d_m[mesh_interface_dofs] - d_s[solid_dofs]``
     (one-to-one reference matching); the return value is the maximum absolute
     difference over both components, in metres.
+
+    中文：返回 ``x`` 处约束 ``d_m|Gamma = H_d d_s|Gamma`` 的最大原始违反量（米）。对应 T21
+    湿网格行 ``d_m[mesh_interface_dofs] - d_s[solid_dofs]``（一一参考匹配），取两分量上绝对
+    差的最大值；界面为空时返回 0。
     """
     if not isinstance(context, MonolithicContext):
         raise TypeError("context must be a MonolithicContext.")
@@ -346,6 +413,9 @@ def project_interface_compatibility(x, *, context):
 
     This is the explicit projection used when ``compatibility="project"``; the
     projected array is a frozen copy and ``x`` is never modified.
+
+    中文：返回一个满足相容性的 ``x`` 副本：把网格迹（``d_m``）在湿界面处改为固体迹（``d_s``），
+    即为 ``compatibility="project"`` 时的显式投影。结果为冻结副本，原 ``x`` 不被修改。
     """
     if not isinstance(context, MonolithicContext):
         raise TypeError("context must be a MonolithicContext.")
@@ -364,6 +434,11 @@ def scaled_time_terms(x, *, context, solid_states, fluid_states, scales):
     ``solid_states``/``fluid_states`` are the accepted histories used by
     ``context.stencil``, latest first with ``stencil.order`` entries.
     Returns a read-only ``{block: value}`` mapping over :data:`TIME_TERM_BLOCKS`.
+
+    中文：给出单个 BDF 模板在 ``x`` 处的缩放时间项（定常判据，见模块 docstring）。对
+    ``u_f``/``d_s``/``v_s`` 计算 ``|a_0 x + sum_{j>=1} a_j x^{k-j}|`` 逐分量除以缩放向量后的
+    最大绝对值，返回只读的 ``{block: 值}`` 映射；``solid_states``/``fluid_states`` 是模板所用、
+    "最近优先"的已接受历史（含 ``stencil.order`` 个条目）。
     """
     if not isinstance(context, MonolithicContext):
         raise TypeError("context must be a MonolithicContext.")
@@ -377,6 +452,7 @@ def scaled_time_terms(x, *, context, solid_states, fluid_states, scales):
     scale = _validated_scales(scales, layout.n_total)
     coefficients = np.asarray(stencil.coefficients, dtype=float)
     blocks = layout.unpack(values)
+    # a_0 项：当前状态乘以 stencil.coefficients[0]；后续按 j>=1 叠加权重 a_j 的历史状态。
     terms = {"u_f": coefficients[0]*np.asarray(blocks["u_f"]).ravel(),
              "d_s": coefficients[0]*np.asarray(blocks["d_s"]).ravel(),
              "v_s": coefficients[0]*np.asarray(blocks["v_s"]).ravel()}
@@ -391,7 +467,11 @@ def scaled_time_terms(x, *, context, solid_states, fluid_states, scales):
 
 
 class _MonolithicEvaluation:
-    """One lazily evaluated candidate state (residual first, tangent on demand)."""
+    """One lazily evaluated candidate state (residual first, tangent on demand).
+
+    中文：一次候选状态的惰性求值对象——先按需算残差，切线（``jacobian``）与预条件子只在被读取
+    时才物化，同一 ``x`` 上重复读取复用缓存；适配器不持有求解器状态。
+    """
 
     __slots__ = ("_adapter", "_x", "_residual", "_jacobian", "_preconditioner")
 
@@ -429,6 +509,11 @@ class _MonolithicAdapter:
     the accepted point, the matrix-free route hands out a ``LinearOperator``
     that calls ``mode="jvp"`` once per direction.  The adapter owns no solver
     state and never modifies the context, the reference mesh or the base.
+
+    中文：把 :class:`MonolithicContext` 绑定到 ``solve_newton`` 的 ``evaluate`` 协议上。T21
+    求值在此计数与计时；切线惰性生成——assembled 路线在已接受点额外做一次
+    ``mode="assembled"`` 求值，jvp 路线返回一个每次矩阵-向量乘调一次 ``mode="jvp"`` 的
+    ``LinearOperator``。适配器不持有求解器状态，也不修改上下文、参考网格或历史基准。
     """
 
     def __init__(self, context, *, jacobian_mode, accounting, preconditioner=None):
@@ -470,6 +555,7 @@ class _MonolithicAdapter:
 
     def jacobian(self, x):
         self.accounting.jacobian_reads += 1
+        # 路线显式：assembled 物化 CSR 供 splu；jvp 返回矩阵无关 LinearOperator 供 GMRES。
         if self.jacobian_mode == "assembled":
             return self._evaluate(x, mode="assembled").jacobian
         size = self.context.layout.n_total
@@ -502,7 +588,10 @@ class _MonolithicAdapter:
 
 
 def _block_norms(x, residual, layout, scales):
-    """``max_i |R_b,i| / S_b,i`` per block (the convergence-criterion pieces)."""
+    """``max_i |R_b,i| / S_b,i`` per block (the convergence-criterion pieces).
+
+    中文：逐块计算缩放残差最大值 ``max_i |R_b,i| / S_b,i``，是收敛判据的组成部分。
+    """
     return MappingProxyType({
         name: float(np.max(np.abs(np.asarray(residual)[layout.slice_of(name)]
                                   / scales[layout.slice_of(name)])))
@@ -510,6 +599,7 @@ def _block_norms(x, residual, layout, scales):
 
 
 def _solver_name(jacobian_mode):
+    # 直接分解路线记 splu，矩阵无关路线记 gmres（供结果中 linear_solver 字段）。
     return "splu" if jacobian_mode == "assembled" else "gmres"
 
 
@@ -525,6 +615,13 @@ class MonolithicStepResult:
     ``d_m|Gamma = H_d d_s|Gamma`` there.  ``linear_solver`` is ``"splu"``
     (assembled route; ``linear_iterations`` is then 0 by definition) or
     ``"gmres"`` (matrix-free route).
+
+    中文：一次收敛的整体 Newton 步的只读结果。``x``/``residual``/``scales`` 为冻结副本；
+    ``records`` 存放已接受的 :class:`~fsi_ice.coupling.newton.NewtonIterationRecord`（第 0 条为
+    起始记录）。``threshold`` 为本次求解声明的收敛阈值，``block_norms`` 为接受点的逐块缩放残差
+    最大值，``interface_gap`` 为该点 ``d_m|Gamma = H_d d_s|Gamma`` 的原始违反量。
+    ``linear_solver`` 为 ``"splu"``（装配路线，``linear_iterations`` 恒为 0）或 ``"gmres"``
+    （矩阵无关路线）。
     """
 
     success: bool
@@ -572,7 +669,10 @@ class MonolithicStepResult:
 
     @property
     def uses_krylov(self):
-        """False on the assembled route: a direct factorization has no Krylov iterations."""
+        """False on the assembled route: a direct factorization has no Krylov iterations.
+
+        中文：装配（直接分解）路线返回 False（无 Krylov 迭代）；仅 GMRES 路线返回 True。
+        """
         return self.linear_solver == "gmres"
 
 
@@ -601,6 +701,10 @@ def _compatibility_tolerance(x, context):
     The driver evaluates the form on the current wet-trace coordinates; the
     candidate evaluation repeats the check on the full candidate interface, so
     a borderline state still fails structurally inside ``evaluate_monolithic``.
+
+    中文：候选界面几何检查所用的间隙容差，形式与 ``topology.atol + topology.rtol*scale``
+    相同（``scale`` 取当前湿迹坐标量级）。驱动在当前湿迹坐标上先判一次；候选求值会在完整候选
+    界面上再判一次，故临界状态仍会在 :func:`evaluate_monolithic` 内以结构化方式失败。
     """
     scale = _interface_scales(x, context)
     return float(context.topology.atol+context.topology.rtol*scale)
@@ -621,6 +725,14 @@ def solve_monolithic_step(context, x0, *, options=None, scales=None, jacobian_mo
     Returns a read-only :class:`MonolithicStepResult`; every failure raises
     :class:`MonolithicNewtonFailure` with phase, iteration, normalized and raw
     norms and complete diagnostics (partial counters and timings included).
+
+    中文：在 ``context`` 处对 ``R(x) = 0`` 做一次阻尼整体 Newton 求解。``x0`` 为起点（会取
+    冻结副本）；``options`` 为 :class:`~fsi_ice.coupling.newton.NewtonOptions`；``scales`` 为
+    各分量物理尺度向量（收敛判据 ``atol + rtol*||r0||_S`` 用，缺省全 1）；``jacobian_mode``
+    显式选择切线路线（:data:`JACOBIAN_MODES`，不推断、不回退）；``preconditioner``（可选）须为
+    ``f(x) -> operator``，且仅 ``"jvp"`` 路线可用（否则抛 ``ValueError``）。返回只读
+    :class:`MonolithicStepResult`；任何失败都以 :class:`MonolithicNewtonFailure` 抛出，携带
+    阶段、迭代号、归一化/原始范数与完整诊断（含部分计数与计时）。
     """
     context = _validated_context(context)
     jacobian_mode = _validated_mode(jacobian_mode)
@@ -643,6 +755,7 @@ def solve_monolithic_step(context, x0, *, options=None, scales=None, jacobian_mo
             counters=accounting.counters(failed_steps=1), timings=accounting.timings()) from failure
     gap_before = interface_compatibility_gap(values, context=context)
     gap_tolerance = _compatibility_tolerance(values, context)
+    # 相容性策略：project 先把网格迹投影到固体迹；require 则违反即结构化报错。
     if compatibility == "project":
         values = project_interface_compatibility(values, context=context)
     elif gap_before > gap_tolerance:
@@ -704,6 +817,10 @@ class MonolithicMarchStep:
     ``x`` is the frozen converged state accepted into the history,
     ``time_term``/``time_terms`` the scaled BDF time terms of that state and
     ``counters``/``timings`` the deltas of this step only.
+
+    中文：一次被接受的推进步的只读记录。``x`` 是存入历史的冻结收敛状态；
+    ``time_term``/``time_terms`` 是该状态缩放后的 BDF 时间项；``counters``/``timings`` 只含
+    本步增量。``generation``/``order``/``dt`` 记录该步的 BDF 代数、阶数与时间步长。
     """
 
     index: int
@@ -738,6 +855,12 @@ class MonolithicMarchResult:
     converged steps.  ``x`` and ``scales`` are frozen copies; ``steps`` holds
     one :class:`MonolithicMarchStep` per completed step.  Counter and timing
     mappings aggregate the steps (``total_seconds`` is the march wall clock).
+
+    中文：一次定常推进的只读结果。``success`` 等于 ``steady_reached``：缩放 BDF 时间项低于
+    ``steady_tolerance`` 时以 ``reason="steady"`` 停止，或走满 ``max_steps`` 个收敛步（
+    ``steady_reached=False``，``reason="max_steps"``）。``x``/``scales`` 为冻结副本；``steps``
+    每个完成步一条 :class:`MonolithicMarchStep`。计数与计时映射对步做聚合（``total_seconds``
+    为推进墙钟时间）。
     """
 
     success: bool
@@ -770,11 +893,19 @@ class MonolithicMarchResult:
 
     @property
     def uses_krylov(self):
+        """True on the matrix-free (GMRES) route.
+
+        中文：矩阵无关（GMRES）路线返回 True，装配（直接分解）路线返回 False。
+        """
         return self.linear_solver == "gmres"
 
 
 def _march_timings(step_timings, total_seconds):
-    """Aggregate step timing buckets; ``total_seconds`` is the march wall clock."""
+    """Aggregate step timing buckets; ``total_seconds`` is the march wall clock.
+
+    中文：对逐步计时桶（``evaluate_seconds``/``linear_seconds``/``newton_seconds``）求和，
+    并把 ``total_seconds`` 设为整个推进的墙钟时间。
+    """
     keys = ("evaluate_seconds", "linear_seconds", "newton_seconds")
     result = {key: float(sum(entry[key] for entry in step_timings)) for key in keys}
     result["total_seconds"] = float(total_seconds)
@@ -801,6 +932,16 @@ def march_to_steady(context, x0, *, dt, order=2, max_steps=50, steady_tolerance=
     :class:`MonolithicNewtonFailure` carrying the completed
     :class:`MonolithicMarchStep` records and the aggregated counters.  The
     input context and ``x0`` are never modified.
+
+    中文：从初始历史出发，用恒定 ``dt`` 的 BDF 步推进到定常。初始已接受状态取
+    ``context.base`` 的最近条目（固体 ``(d_s, v_s)``、流体 ``u_f`` 与已接受几何）；新建的
+    ``BDFHistory`` 把代数编号从 0 重新开始，每接受一步加一（``order=2`` 用
+    :class:`~fsi_ice.time.bdf.BDFHistory` 的 BDF1 启动步）。``x0`` 作为第一步的 Newton 起点，
+    之后每步从上一步收敛解出发。每步是一次 :func:`solve_monolithic_step`，其收敛状态被接受为
+    下一条历史（并由收敛 ``d_m`` 重建候选几何）。停机判据为收敛步的缩放 BDF 时间项（见模块
+    docstring）与 ``steady_tolerance`` 比较，``max_steps`` 限制步数。Newton 失败以
+    :class:`MonolithicNewtonFailure` 抛出，携带已完成的 :class:`MonolithicMarchStep` 记录与
+    聚合计数。输入上下文与 ``x0`` 均不被修改。
     """
     context = _validated_context(context)
     jacobian_mode = _validated_mode(jacobian_mode)
@@ -841,6 +982,7 @@ def march_to_steady(context, x0, *, dt, order=2, max_steps=50, steady_tolerance=
     x = np.array(values, copy=True)
     for index in range(int(max_steps)):
         stencil = solid_history.stencil()
+        # 固体与流体历史必须同步推进：两者的 step_id 若不一致说明代数错位，直接报错。
         if fluid_history.stencil().step_id != stencil.step_id:
             raise RuntimeError("march histories lost generation synchronisation.")
         solid_states = tuple((state[0], state[1])
@@ -881,6 +1023,7 @@ def march_to_steady(context, x0, *, dt, order=2, max_steps=50, steady_tolerance=
                 timings=_march_timings(failing_timings, perf_counter()-started)) from failure
 
         blocks = step_context.layout.unpack(outcome.x)
+        # 用收敛状态评估缩放 BDF 时间项（定常判据），只对 u_f/d_s/v_s 取。
         terms = scaled_time_terms(outcome.x, context=step_context, solid_states=solid_states,
                                   fluid_states=fluid_states, scales=scale)
         final_terms = terms
@@ -903,9 +1046,11 @@ def march_to_steady(context, x0, *, dt, order=2, max_steps=50, steady_tolerance=
         geometry = build_ale_geometry(
             reference_mesh, np.asarray(blocks["d_m"]), quality_limits=base.quality_limits,
             candidate_id=("accepted", context.candidate_id, index))
+        # 只保留最近 stencil.order 个已接受几何（最新在列表首），供下一步的 BDF 历史使用。
         geometries.insert(0, geometry)
         del geometries[2:]
 
+        # 停机判据：缩放 BDF 时间项低于容差即视为到达定常不动点。
         if final_term <= steady_tolerance:
             return MonolithicMarchResult(
                 success=True, steady_reached=True, x=outcome.x, reason="steady", dt=float(dt),

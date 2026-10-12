@@ -5,6 +5,11 @@ in the reference configuration.  The matching fixes the endpoint
 correspondence, the scalar map ``h`` (fluid P2 trace <- solid P1 trace) and
 its interleaved block form ``H``; deformed configurations never re-match
 nodes and never move reference coordinates.
+
+本模块在参照构形下对湿界面的固体 P1 迹与流体 P2 迹做一次性匹配，确定端点
+对应、标量映射 ``h``（流体 P2 迹 <- 固体 P1 迹）及其交错块形式 ``H``。关键
+约定：参照构形只匹配一次，形变构形从不重新匹配节点、也从不移动参照坐标；
+``atol`` 与坐标同量纲、``rtol`` 无量纲；法向为各子域外法向、两域法向相反。
 """
 
 from dataclasses import dataclass
@@ -17,7 +22,12 @@ from fsi_ice.solid.linear import vector_dofs
 
 
 def _digest(*items):
-    """Stable short digest of labelled arrays and strings."""
+    """Stable short digest of labelled arrays and strings.
+
+    对带标签的数组/字符串做稳定短摘要（SHA-256 前 16 位十六进制）。用于生成可
+    复现的 ``topology_id`` / ``mesh_id``：相同参照数据得到相同摘要，重编号或
+    重划网格会改变摘要。标签与值之间用分隔符隔开以避免歧义。
+    """
     hasher = hashlib.sha256()
     for label, value in items:
         hasher.update(label.encode("utf-8"))
@@ -58,6 +68,12 @@ class InterfaceEdge:
     ``(t_y, -t_x)`` of the stored tangent is the outward normal of that
     domain.  ``orientation`` is ``+1`` when ``solid_edge[k]`` matches
     ``fluid_edge[k]`` and ``-1`` when the stored orders are reversed.
+
+    一条物理湿界面棱，只登记一次。``solid_edge``/``fluid_edge`` 以各自所有者外
+    单元逆时针遍历顺序存储全局节点对，因此存储切线的 ``(t_y, -t_x)`` 即该子域
+    外法向。``orientation`` 为 ``+1`` 表示 ``solid_edge`` 与 ``fluid_edge`` 顺序
+    一致、``-1`` 表示两者存储顺序相反。``length`` 为参照棱长（长度量纲），
+    ``N_s``/``N_f`` 为参照构形下的一对相反外法向（无量纲单位向量）。
     """
 
     solid_edge: tuple
@@ -86,6 +102,15 @@ class InterfaceTopology:
     identical reference data rebuilds the same id, renumbering or re-meshing
     changes it.  ``solid_mesh_id``/``fluid_mesh_id`` identify the full
     reference meshes.
+
+    不可变的参照界面拓扑与映射数据。``solid_nodes`` 按升序排列；
+    ``fluid_vertex_nodes[k]`` 是与 ``solid_nodes[k]`` 匹配的流体节点；
+    ``fluid_p2_nodes`` 先列这些顶点、再按 ``edge_pairs`` 顺序列出流体棱中点。
+    压缩向量遵循 ``vector_dofs`` 的交错约定 ``[x0, y0, x1, y1, ...]``；``h`` 将
+    压缩固体 P1 迹映射到压缩流体 P2 迹（顶点单位映射、棱中点取两端点 0.5 平均），
+    ``H`` 为其块形式 ``kron(h, I_2)``。``topology_id`` 是匹配结果的稳定摘要，
+    相同参照数据重建同一 id，重编号或重划网格会改变它；``solid_mesh_id``/
+    ``fluid_mesh_id`` 标识完整参照网格。
     """
 
     solid_mesh: object
@@ -122,29 +147,45 @@ class InterfaceTopology:
 
     @property
     def n_solid_nodes(self):
-        """Full solid mesh node count (not only interface nodes)."""
+        """Full solid mesh node count (not only interface nodes).
+
+        完整固体网格节点数（含非界面节点）。
+        """
         return len(self.solid_mesh.points)
 
     @property
     def n_fluid_nodes(self):
-        """Full fluid P2 node count (not only interface nodes)."""
+        """Full fluid P2 node count (not only interface nodes).
+
+        完整流体 P2 节点数（含非界面节点）。
+        """
         return len(self.fluid_space.points)
 
     @property
     def n_solid_interface_nodes(self):
+        """固体界面 P1 迹节点数 ``n_sG``（= ``len(solid_nodes)``）。"""
         return len(self.solid_nodes)
 
     @property
     def n_fluid_interface_nodes(self):
+        """流体界面 P2 迹节点数 ``n_fG``（顶点数 + 棱中点数）。"""
         return len(self.fluid_p2_nodes)
 
     @property
     def n_edges(self):
+        """界面棱数（``edge_pairs`` 长度）。"""
         return len(self.edge_pairs)
 
 
 @dataclass(frozen=True)
 class _TaggedEdges:
+    """一侧带标签界面棱的校验结果（内部使用）。
+
+    ``nodes`` 为 ``(k, 2)`` 全局节点对，``owners`` 为每棱唯一所有者单元编号，
+    ``local`` 为棱在所有者单元内的逆时针局部端点下标，``lengths`` 为参照棱长
+    （长度量纲），``normals`` 为按逆时针遍历切线 ``(t_y, -t_x)`` 得到的外法向。
+    """
+
     nodes: np.ndarray
     owners: np.ndarray
     local: np.ndarray
@@ -153,7 +194,12 @@ class _TaggedEdges:
 
 
 def _tagged_edges(mesh, tag, side):
-    """Validate one tagged side and recover owner cells and outward normals."""
+    """Validate one tagged side and recover owner cells and outward normals.
+
+    校验一侧（``side`` 取 "solid"/"fluid"）带标签界面并恢复所有者单元与外法向。
+    检查坐标/连通性形状与有限性、标签存在、棱无重复、每条棱恰有一个单元所有者、
+    棱长非零，返回 :class:`_TaggedEdges`。``side`` 仅用于错误信息，不影响计算。
+    """
     points = np.asarray(mesh.points, dtype=float)
     cells = np.asarray(mesh.cells)
     if points.ndim != 2 or points.shape[1] != 2 or not np.all(np.isfinite(points)):
@@ -171,11 +217,13 @@ def _tagged_edges(mesh, tag, side):
     if np.any(edges < 0) or np.any(edges >= len(points)):
         raise ValueError(f"{side.capitalize()} tag {tag!r} contains an edge node outside the mesh.")
     sorted_edges = np.sort(edges, axis=1)
+    # 无向棱去重：同一对节点重复出现即为重复登记。
     unique_edges, counts = np.unique(sorted_edges, axis=0, return_counts=True)
     repeated = np.flatnonzero(counts > 1)
     if len(repeated):
         key = unique_edges[repeated[0]]
         raise ValueError(f"Duplicate {side} edge ({int(key[0])}, {int(key[1])}) in tag {tag!r}.")
+    # 建无向棱 -> [(单元, 局部端点 a, b), ...] 索引，用于校验每条界面棱唯一所有者。
     owners = {}
     for cell_id, cell in enumerate(cells):
         for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -204,6 +252,8 @@ def _tagged_edges(mesh, tag, side):
     if len(bad):
         row = edges[bad[0]]
         raise ValueError(f"Zero-length {side} edge ({int(row[0])}, {int(row[1])}) in tag {tag!r}.")
+    # 外法向 = 逆时针切线 (dx,dy) 旋转 -90° 后归一化：n = (dy,-dx)/|t|，
+    # 保证法向指向所有者单元外部。
     normals = np.column_stack((tangent[:, 1], -tangent[:, 0])) / lengths[:, None]
     return _TaggedEdges(edges, owner_cells, local, lengths, normals)
 
@@ -217,6 +267,14 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
     zero-length edges, non-finite coordinates and segmentation mismatches are
     rejected with the offending tag, edge and node reported.  The meshes are
     never modified and the matching is never repeated for deformed states.
+
+    在参照构形下对湿界面做一次性匹配。输入 ``solid_mesh``/``fluid_mesh`` 为参照
+    网格，``fluid_space`` 必须是由 ``fluid_mesh`` 构建的 P2 空间，``solid_tag``/
+    ``fluid_tag`` 为界面标签。端点按参照坐标在 ``atol + rtol * max(|X_solid|,
+    |X_fluid|)`` 容差内匹配（``atol`` 与坐标同量纲，``rtol`` 无量纲）。重复/缺失
+    棱、二义或未匹配端点、非外棱或多所有者棱、零长棱、非有限坐标、分段不一致均
+    报错并指出标签、棱、节点。返回固定的 :class:`InterfaceTopology`；参照网格
+    不被修改，形变态不再重匹配。
     """
     for name, value in (("atol", atol), ("rtol", rtol)):
         number = float(value)
@@ -239,6 +297,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
     coordinates_f = points_f[fluid_side_nodes]
     with np.errstate(over="ignore", invalid="ignore"):
         distances = np.linalg.norm(coordinates_s[:, None, :] - coordinates_f[None, :, :], axis=2)
+        # 逐对配对容差：atol + rtol * max(|X_s|,|X_f|)，两两比较得到 (n_s_side, n_f_side) 掩码。
         allowed = atol + rtol * np.maximum(np.linalg.norm(coordinates_s, axis=1)[:, None],
                                            np.linalg.norm(coordinates_f, axis=1)[None, :])
     if not np.all(np.isfinite(distances)):
@@ -296,6 +355,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
     cells_f = np.asarray(fluid_mesh.cells)
     edge_pairs = []
     for j, i in claims.items():
+        # 用所有者单元和逆时针局部端点取出两域棱的全局端点，判定遍历方向是否一致。
         solid_a = int(cells_s[solid.owners[i], solid.local[i, 0]])
         solid_b = int(cells_s[solid.owners[i], solid.local[i, 1]])
         fluid_a = int(cells_f[fluid.owners[j], fluid.local[j, 0]])
@@ -321,6 +381,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
                              f"lengths {length!r} and {float(fluid.lengths[j])!r}.")
         normal_s = solid.normals[i]
         normal_f = fluid.normals[j]
+        # 两域外法向应相反：n_s + n_f ≈ 0，容差由角度误差 (2*tol/length) 折算。
         normal_error = float(np.linalg.norm(normal_s + normal_f))
         normal_tolerance = 1e-12 + 2 * match_tolerance / max(length, np.finfo(float).tiny)
         if normal_error > normal_tolerance:
@@ -333,6 +394,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
                                         (float(normal_f[0]), float(normal_f[1]))))
     edge_pairs.sort(key=lambda pair: (min(pair.solid_edge), max(pair.solid_edge)))
 
+    # 流体 P2 迹节点：先按 solid_nodes 顺序排列匹配顶点，再按 edge_pairs 顺序排列棱中点。
     solid_nodes = solid_side_nodes.astype(np.int64)
     solid_index = {int(node): k for k, node in enumerate(solid_nodes)}
     fluid_vertex_nodes = np.array([matched_fluid[int(node)] for node in solid_nodes], dtype=np.int64)
@@ -353,6 +415,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
             rows.append(row)
             columns.append(solid_index[node])
             values.append(0.5)
+    # 标量映射 h：顶点行单位映射，棱中点行对两端点各取 0.5；H = kron(h, I_2) 处理二维矢量自由度。
     h = csr_matrix(coo_matrix((values, (rows, columns)), shape=(n_fluid_gamma, n_solid_gamma)))
     H = _freeze_sparse(kron(h, np.eye(2), format="csr"))
     h = _freeze_sparse(h)
@@ -364,6 +427,7 @@ def build_matching_interface(solid_mesh, fluid_mesh, fluid_space, *, solid_tag, 
     coordinate_scale = max(float(np.linalg.norm(X_s_gamma, axis=1).max()),
                            float(np.linalg.norm(X_f_gamma, axis=1).max()))
     match_tolerance = atol + rtol * coordinate_scale
+    # 参照匹配残差：流体 P2 迹坐标与 h 映射后的固体 P1 迹坐标之差，应小于容差。
     residual = np.linalg.norm(X_f_gamma - np.asarray(h @ X_s_gamma), axis=1)
     if float(residual.max()) > match_tolerance:
         row = int(np.argmax(residual))

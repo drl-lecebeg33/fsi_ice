@@ -1,4 +1,9 @@
-"""Taylor-Hood spatial/time verification and fixed-body CFD1/2 benchmarks."""
+"""Taylor-Hood spatial/time verification and fixed-body CFD1/2 benchmarks.
+
+中文说明：本模块做流体单场验证：制造解（Stokes 与 Navier--Stokes）空间收敛、Poiseuille
+精确解，以及固定体 Turek--Hron CFD1/CFD2 基准（阻力/升力对照参考值）。速度/压力分别
+用 P2/P1 Taylor--Hood 元；力为障碍物表面 -integral(sigma*n) 的合力，单位 N/m（单位厚度）。
+"""
 
 from pathlib import Path
 import time
@@ -18,16 +23,26 @@ CFD_SOURCE = "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/c
 
 
 def exact_velocity(points):
+    """制造解速度场 u=(sin(pi x)cos(pi y), -cos(pi x)sin(pi y))。
+
+    输入形状 (n,2) 的坐标点，返回同形状速度；无物理单位约定，用于收敛验证。
+    """
     x, y = np.pi*points[:, 0], np.pi*points[:, 1]
     return np.column_stack((np.sin(x)*np.cos(y), -np.cos(x)*np.sin(y)))
 
 
 def exact_pressure(points):
+    """制造解压力场 p=sin(pi x)sin(pi y)（非线性，便于独立检验 P1 压力收敛）。"""
     # Nonlinear pressure gives a meaningful independent P1 pressure convergence test.
     return np.sin(np.pi*points[:, 0])*np.sin(np.pi*points[:, 1])
 
 
 def manufactured_force(points, *, convection=True):
+    """制造解对应的体积力，使精确场满足动量方程。
+
+    由 -laplacian(u) + grad(p) 得 2*pi^2*u + grad(p)；convection=True 时再加对流项
+    u·grad(u)，得到完整 Navier--Stokes 的体积力（rho=1, mu=1 的标准化形式）。
+    """
     x, y = np.pi*points[:, 0], np.pi*points[:, 1]
     gradient_p = np.pi*np.column_stack((np.cos(x)*np.sin(y), np.sin(x)*np.cos(y)))
     force = 2*np.pi**2*exact_velocity(points)+gradient_p
@@ -37,6 +52,11 @@ def manufactured_force(points, *, convection=True):
 
 
 def temporal_fluid(time_steps, *, order, mesh_level=4):
+    """时间收敛验证：u=exp(-t)*(y*(1-y),0)、p=0，精确空间表示，终止时刻 1。
+
+    对每个 dt 在固定网格上推进 BDF(order) 时间步，最后与解析解比较速度 L2 误差，
+    并用 add_orders 得到时间收敛阶。返回按 dt 排列的结果行。
+    """
     mesh = rectangle_mesh(mesh_level)
     def profile(points):
         return np.column_stack((points[:, 1]*(1-points[:, 1]), np.zeros(len(points))))
@@ -64,6 +84,11 @@ def temporal_fluid(time_steps, *, order, mesh_level=4):
 
 
 def inlet_profile(points, mean_velocity, amplitude=1.0):
+    """通道入口抛物线速度剖面（CFD 几何高度 0.41 m）。
+
+    仅对 x≈0 的入口节点赋 x 方向速度 6*U*amp*y*(0.41-y)/0.41^2（峰值 1.5*U），使
+    截面平均速度等于 mean_velocity*amplitude；其余分量为零。points 形状 (n,2)。
+    """
     values = np.zeros_like(points)
     selected = np.isclose(points[:, 0], 0, rtol=0, atol=1e-12)
     values[selected, 0] = 6*mean_velocity*amplitude*points[selected, 1]*(0.41-points[selected, 1])/0.41**2
@@ -71,10 +96,18 @@ def inlet_profile(points, mean_velocity, amplitude=1.0):
 
 
 def run_fluid(config, output, *, plot=True, progress=print):
+    """运行流体单场全套验证并写出报告，返回报告字典。
+
+    依次做制造解空间收敛（Stokes 与 Navier--Stokes）、Poiseuille 精确解、BDF1/2 时间
+    收敛，以及 CFD1/CFD2 基准；每个流体网格复用同一离散方程，仅改变来流 Reynolds 数
+    （对应平均速度 0.2/1.0）。config 需含 manufactured_meshes/fluid_meshes/time_steps
+    与 acceptance。
+    """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     acceptance = config["acceptance"]
     manufactured, poiseuille, cfd = [], [], []
+    # 分别在 Stokes 与 Navier--Stokes（含对流项）下验证空间收敛。
     for nonlinear in (False, True):
         rows = []
         for level in config["manufactured_meshes"]:
@@ -104,6 +137,7 @@ def run_fluid(config, output, *, plot=True, progress=print):
         operators = assemble_stokes(mesh, viscosity=1, density=1000)
         monitor = BoundaryMonitor(operators, "obstacle")
         inlet_monitor, outlet_monitor = BoundaryMonitor(operators, "inlet"), BoundaryMonitor(operators, "outlet")
+        # 参考 (drag, lift) 取自 FeatFlow CFD 基准，单位 N/m（单位厚度）。
         for case, mean, reference in (("CFD1", 0.2, [14.29, 1.119]), ("CFD2", 1.0, [136.7, 10.53])):
             started = time.perf_counter()
             solution = solve_navier_stokes(operators, lambda points: inlet_profile(points, mean),
@@ -122,6 +156,7 @@ def run_fluid(config, output, *, plot=True, progress=print):
                                 velocity_points=operators.space.points, velocity=solution.velocity, pressure=solution.pressure)
     write_csv(output / "cfd.csv", cfd)
     finest = [r for r in cfd if r["mesh_size"] == config["fluid_meshes"][-1]]
+    # 制造解阶次与参考误差取最细网格；守恒/连续/物理残差覆盖所有算例。
     checks = {"velocity_mesh_order": all(r["velocity_l2_order"] >= acceptance["velocity_order_min"] for r in manufactured if r["velocity_l2_order"] is not None),
               "pressure_mesh_order": all(r["pressure_l2_order"] >= acceptance["pressure_order_min"] for r in manufactured if r["pressure_l2_order"] is not None),
               "poiseuille_exact": all(r["velocity_l2"] < 1e-10 and r["pressure_l2"] < 1e-9 for r in poiseuille),
@@ -147,6 +182,7 @@ def run_fluid(config, output, *, plot=True, progress=print):
 
 
 def save_fluid_plot(output, manufactured, cfd, temporal):
+    """保存三联诊断图 fluid.png：空间收敛、参考误差随网格加密、时间收敛。"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

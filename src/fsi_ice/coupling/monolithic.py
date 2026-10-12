@@ -87,6 +87,30 @@ accepted-state generation of the base) is rejected when the context is built.
 :func:`evaluate_monolithic` rebuilds every candidate object from ``x`` and
 never mutates ``x``, the context, the base histories, the reference mesh or the
 topology; repeated evaluation of the same inputs is bitwise reproducible.
+
+中文说明
+--------
+
+本模块实现整体耦合（monolithic）的全局残差、完整耦合 Jacobian 与矩阵无关 JVP，是 T21 的
+冻结求值契约。它只负责"给定候选未知量 ``x``，算出 ``R(x)``、``dR/dx`` 或 ``dR[q]``"，不
+实现 Newton 迭代与时间推进循环（这两者分别在 :mod:`fsi_ice.coupling.newton` 与
+:mod:`fsi_ice.coupling.monolithic_newton` 中）。
+
+关键约定：
+
+* **统一残差块划分**：全局未知向量固定拆成 6 个块
+  ``BLOCK_NAMES = ("u_f", "p_f", "d_s", "v_s", "d_m", "g")``，块的顺序、形状与全局起始行号
+  由 :class:`BlockLayout` 唯一确定；各块物理含义见上方表格，二维节点块一律用
+  :func:`~fsi_ice.solid.linear.vector_dofs` 的交错排序。
+* **完整耦合 Jacobian 的来源**：每一块都调用共享单场内核的解析切线拼装而成，逐块来源记录在
+  :data:`JACOBIAN_BLOCK_SOURCES`；唯一的近似是 ``fluid.ale`` 中"可调用流体体积力"的中心差分，
+  由 :data:`APPROXIMATIONS` 显式标注，必须用中心差分单独校验；没有任何耦合项被丢弃。
+* **伪时间定常推进**：本模块只给出单个 BDF 步的残差/Jacobian；定常解通过上层（
+  :func:`~fsi_ice.coupling.monolithic_newton.march_to_steady`）用恒定 ``dt`` 的伪时间步反复
+  求解并接受历史得到，本模块不含时间推进循环。
+
+符号与单位约定：界面迹力 ``g`` 量纲为力（N），已含厚度一次，正方向为"流体作用在固体上"
+（fluid-on-solid），故固体动量残差中以 ``-interface_load`` 出现。
 """
 
 from dataclasses import dataclass, field
@@ -109,6 +133,8 @@ from fsi_ice.solid.linear import ElasticMaterial, assemble_elasticity, vector_do
 from fsi_ice.solid.stvk import assemble_mass, stvk_residual
 from fsi_ice.time import BDFStencil
 
+# 全局未知向量的块顺序（不可改动）：流体速度、流体压力、固体位移、固体速度、
+# 流体参考网格位移、流体界面迹力。每个块的形状与全局行号由 BlockLayout 决定。
 BLOCK_NAMES = ("u_f", "p_f", "d_s", "v_s", "d_m", "g")
 
 #: Per-row-block derivative provenance (T21 item 21-04 approximation audit).
@@ -139,6 +165,7 @@ JACOBIAN_BLOCK_SOURCES = MappingProxyType({
                         "kind": "analytic", "rows": "u_f, p_f, d_s, v_s, d_m"},
 })
 
+# 装配 Jacobian 中所有被显式标注的近似（目前仅一处：可调用流体体积力的中心差分）。
 #: Every explicitly marked approximation of the assembled Jacobian.
 APPROXIMATIONS = (
     "A callable fluid body force is differentiated by central differences inside "
@@ -187,7 +214,12 @@ def _zero(rows, columns):
 
 @dataclass(frozen=True)
 class PressurePin:
-    """``p_node - value = 0`` row replacing one P1 pressure equation."""
+    """``p_node - value = 0`` row replacing one P1 pressure equation.
+
+    中文说明：用一条 ``p_node - value = 0`` 的行替换某个 P1 压力自由度方程，以固定压力的
+    参考值、消除纯 Neumann 压力场的常数零空间。``node`` 为 P1 节点下标（非负整数），
+    ``value`` 为该点的参考压力（与压力同量纲），默认 0。
+    """
 
     node: int
     value: float = 0.0
@@ -211,6 +243,13 @@ class BlockLayout:
     interface rows take precedence over Dirichlet rows, so wet nodes supplied as
     Dirichlet are removed and reported in ``excluded_fluid_dirichlet_nodes`` /
     ``excluded_mesh_dirichlet_nodes``.
+
+    中文说明：描述全局未知向量 ``x`` 的分块布局。``shapes``/``sizes``/``starts``/``slices``
+    按 :data:`BLOCK_NAMES` 顺序给出每块的原始形状、展平长度、全局起始行号与切片。所有
+    Dirichlet/界面下标数组都是块内局部下标（``0 .. 块长-1``），全局行号为
+    ``starts[block] + 局部下标``。湿界面行优先于 Dirichlet 行，因此被 Dirichlet 重复指定的
+    湿节点会被剔除并记录在 ``excluded_*_dirichlet_nodes``。``gather``/``unpack`` 返回只读
+    视图（不可写回），``pack``/``scatter`` 返回副本。
     """
 
     shapes: tuple
@@ -242,6 +281,7 @@ class BlockLayout:
             sizes.append(size)
         # Half-open slices tile [0, n_total) without overlap by construction; the
         # stored arrays are checked so a hand-built layout cannot desynchronize.
+        # 中文：半开切片按块顺序无重叠地铺满 [0, n_total)，由此得到各块全局起始行号。
         starts, total = [], 0
         for size in sizes:
             starts.append(total)
@@ -293,7 +333,10 @@ class BlockLayout:
         return self.starts[BLOCK_NAMES.index(block)]
 
     def gather(self, block, x):
-        """Read-only view of one block of ``x`` in its original shape."""
+        """Read-only view of one block of ``x`` in its original shape.
+
+        中文：按块名取出 ``x`` 的一个块，返回其原始形状的只读视图（不可写回原向量）。
+        """
         index = BLOCK_NAMES.index(block)
         values = np.asarray(x, dtype=float)
         if values.ndim != 1 or values.shape[0] != self.n_total:
@@ -303,14 +346,21 @@ class BlockLayout:
         return view
 
     def unpack(self, x):
-        """Read-only views of every block; a caller cannot write through them."""
+        """Read-only views of every block; a caller cannot write through them.
+
+        中文：按 :data:`BLOCK_NAMES` 顺序返回全部块的只读视图，调用者无法透过视图写入 ``x``。
+        """
         values = np.asarray(x, dtype=float)
         if values.ndim != 1 or values.shape[0] != self.n_total:
             raise ValueError(f"x must have shape ({self.n_total},), got {values.shape}.")
         return {name: self.gather(name, values) for name in BLOCK_NAMES}
 
     def pack(self, values):
-        """Copy blocks (mapping by name or sequence in ``BLOCK_NAMES`` order) into ``x``."""
+        """Copy blocks (mapping by name or sequence in ``BLOCK_NAMES`` order) into ``x``.
+
+        中文：把各块（按名映射，或按 :data:`BLOCK_NAMES` 顺序的序列）拷贝拼装成完整向量并返回；
+        输入块本身不被修改。
+        """
         if hasattr(values, "keys"):
             missing = [name for name in BLOCK_NAMES if name not in values]
             unknown = [name for name in values if name not in BLOCK_NAMES]
@@ -331,7 +381,10 @@ class BlockLayout:
         return result
 
     def scatter(self, block, values):
-        """Place one block into a zero vector of the full length (a copy)."""
+        """Place one block into a zero vector of the full length (a copy).
+
+        中文：把单个块放入一个全零的全长向量并返回（副本），其余块保持为 0。
+        """
         index = BLOCK_NAMES.index(block)
         array = np.asarray(values, dtype=float)
         if array.shape != self.shapes[index]:
@@ -353,6 +406,11 @@ def build_block_layout(topology, *, fluid_dirichlet_nodes=None, fluid_dirichlet_
     ``solid_dirichlet_tags``) select the clamped solid rows; the velocity rows
     default to the same nodes.  ``pressure_pin`` is an optional
     :class:`PressurePin`.
+
+    中文说明：由匹配好的界面拓扑构造冻结的 :class:`BlockLayout`。输入为流体 P2、网格 P1 与
+    固体 P1 的 Dirichlet 节点（或标签），以及可选的压力钉；输出即分块布局。约定湿界面节点
+    优先，故传入的 Dirichlet 中被界面占用的节点会被剔除并单独报告；``mesh_dirichlet_nodes``
+    缺省为除湿界面顶点外的全部流体外边界顶点。每对同名节点/标签参数只能二选一。
     """
     if not isinstance(topology, InterfaceTopology):
         raise TypeError("topology must be an InterfaceTopology.")
@@ -425,6 +483,13 @@ class MonolithicBase:
     belongs to; a context rejects a stencil whose ``step_id`` differs.  Boundary
     data may be a constant pair, an ``(n, 2)`` array or a callable evaluated at
     the current (fluid velocity) / reference (mesh, solid) nodes.
+
+    中文说明：一个 BDF 步的"已接受（冻结）"历史与边界数据。``solid_states`` 是"最近优先"
+    排列的固体 ``(d_s, v_s)`` 完整数组，``fluid_states`` 是已接受的流体 P2 速度，
+    ``accepted_geometries`` 是已接受的 ALE 构型；三者都含 ``stencil.order`` 个条目并在此复制
+    冻结。``generation`` 是基准所属的 BDF 代数，``step_id`` 与之一致的模板才会被接受。边界
+    数据可为常数二元组、``(n, 2)`` 数组或可调用对象（在"当前流体速度节点 / 参考网格与固体
+    节点"处求值）。本类要求固体材料为平面应变 StVK。
     """
 
     reference_mesh: TriMesh
@@ -490,6 +555,13 @@ class MonolithicContext:
     geometry and load; ``thickness`` is the unit-depth solid thickness counted
     exactly once by the interface load.  ``pressure_constraint`` is a
     :class:`PressurePin` (or ``None`` to inherit the pin stored in the layout).
+
+    中文说明：一次整体耦合 BDF 步的冻结输入集合：分块布局、历史基准、BDF 模板、界面拓扑、
+    参考域 P1 Laplace 刚度 ``K_h``、候选版本号、厚度与压力约束。``thickness`` 是单位深度
+    固体厚度，由界面载荷恰好计入一次；``pressure_constraint`` 为 ``None`` 时继承布局中的压力
+    钉。``candidate_id`` 标记候选几何/界面几何/载荷的版本。构造时会校验几何尺寸、界面自由度
+    与拓扑一致、历史条目数等于 ``stencil.order``，并且 ``base.generation == stencil.step_id``
+    （否则判为过期候选并抛出 ``ValueError``）。
     """
 
     layout: BlockLayout
@@ -551,6 +623,7 @@ class MonolithicContext:
         for index, geometry in enumerate(self.base.accepted_geometries):
             if getattr(geometry, "reference_mesh", None) is not topology.fluid_mesh:
                 raise ValueError(f"accepted_geometries[{index}] was built on a different reference mesh.")
+        # 过期候选判定：BDF 模板的 step_id 必须等于基准"已接受状态"的代数。
         if self.base.generation != self.stencil.step_id:
             raise ValueError(f"stale candidate: stencil.step_id={self.stencil.step_id} does not match the "
                              f"accepted-state generation {self.base.generation}; rebuild the context from "
@@ -571,6 +644,10 @@ def require_candidate(context, *, geometry=None, interface_geometry=None, load=N
     the context topology; an interface load must also have been assembled on the
     given interface geometry.  Raises ``ValueError`` naming the offending object
     otherwise.
+
+    中文说明：校验候选几何、候选界面几何与界面载荷是否与上下文属于同一版本，用于拒绝过期或
+    混用的候选。所有候选对象必须携带上下文的 ``candidate_id`` 且属于该拓扑；界面载荷还必须
+    在给定界面几何上装配。不一致时抛出 ``ValueError`` 并指明出错对象。
     """
     if not isinstance(context, MonolithicContext):
         raise TypeError("context must be a MonolithicContext.")
@@ -599,7 +676,10 @@ def require_candidate(context, *, geometry=None, interface_geometry=None, load=N
 
 @dataclass(frozen=True)
 class _FluidState:
-    """Minimal fluid state adapter accepted by the shared stress/load kernels."""
+    """Minimal fluid state adapter accepted by the shared stress/load kernels.
+
+    中文：供共享应力/载荷内核使用的最小流体状态适配器，只暴露速度与压力。
+    """
 
     velocity: np.ndarray
     pressure: np.ndarray
@@ -607,6 +687,12 @@ class _FluidState:
 
 @dataclass(frozen=True)
 class _Candidate:
+    """One evaluation's rebuilt candidate objects (geometry, operators, load...).
+
+    中文：``_evaluate_candidate`` 的输出集合，成员（候选几何、流算子与 ALE 上下文、界面
+    几何、流体状态、界面载荷及各阶段耗时）全部由当前 ``x`` 与冻结上下文重建，不跨调用缓存。
+    """
+
     geometry: object
     operators: object
     ale_context: object
@@ -619,6 +705,12 @@ class _Candidate:
 
 @dataclass(frozen=True)
 class _Physics:
+    """Shared single-field kernels of one evaluation (residual/tangent pieces).
+
+    中文：一次求值中用到的共享单场内核结果：流体残差与切线、固体质量阵、内力矢量、
+    一致切线刚度、以及网格块刚度 ``kron(K_h, I_2)``。
+    """
+
     flow_residual: np.ndarray
     flow_tangent: object
     mass: object
@@ -629,6 +721,12 @@ class _Physics:
 
 @dataclass(frozen=True)
 class _Rows:
+    """Global row indices of every replaced (constraint/Dirichlet) row.
+
+    中文：被替换行（湿界面约束行与各 Dirichlet 行、压力钉行）的全局行号集合，由
+    :func:`_global_rows` 依布局一次性算出。
+    """
+
     u_interface: np.ndarray
     u_dirichlet: np.ndarray
     p_pin: np.ndarray
@@ -639,6 +737,7 @@ class _Rows:
 
 
 def _global_rows(layout):
+    # 全局行号 = 各块起始行号 starts[block] + 块内局部下标（见 BlockLayout 约定）。
     u0, p0, ds0, vs0, dm0, _ = layout.starts
     pin = layout.pressure_pin
     return _Rows(
@@ -653,7 +752,12 @@ def _global_rows(layout):
 
 
 def _solid_history_terms(context):
-    """``hd``/``hv`` = sum of a_j * accepted states for displacement/velocity."""
+    """``hd``/``hv`` = sum of a_j * accepted states for displacement/velocity.
+
+    中文：BDF 历史项 ``hd``/``hv`` = ``sum_{j>=1} a_j * 已接受状态``（位移/速度），与当前项
+    ``a_0 w`` 一起构成 ``D_BDF w = a_0 w + sum_{j>=1} a_j w_j``。系数取自
+    ``stencil.coefficients``，状态按"最近优先"与 ``base.solid_states`` 逐一对应。
+    """
     coefficients = np.asarray(context.stencil.coefficients, dtype=float)[1:]
     size = 2*len(context.topology.solid_mesh.points)
     displacement = np.zeros(size)
@@ -665,6 +769,7 @@ def _solid_history_terms(context):
 
 
 def _solid_body_load(base, mesh, material):
+    # 常数零体力时直接返回零载荷，跳过装配；否则调用共享弹性装配并取载荷项 [1]。
     body_force = base.solid_body_force
     if not callable(body_force):
         values = np.asarray(body_force, dtype=float)
@@ -674,7 +779,12 @@ def _solid_body_load(base, mesh, material):
 
 
 def _evaluate_candidate(x, context):
-    """Build every candidate object from ``x``; nothing is cached across calls."""
+    """Build every candidate object from ``x``; nothing is cached across calls.
+
+    中文：从候选未知量 ``x`` 重建全部候选对象——由 ``d_m`` 构造候选 ALE 几何与 GCL 输运、
+    在候选网格上装配流算子并建 ALE 流动上下文、由 ``d_s`` 求界面几何、组装界面载荷；每次
+    调用都重建、不跨调用缓存，最后用 :func:`require_candidate` 校验版本一致。
+    """
     base = context.base
     blocks = context.layout.unpack(x)
     started = time.perf_counter()
@@ -710,7 +820,11 @@ def _evaluate_candidate(x, context):
 
 
 def _physics(context, candidate, d_s):
-    """Shared single-field residual/tangent kernels of one evaluation."""
+    """Shared single-field residual/tangent kernels of one evaluation.
+
+    中文：调用共享单场内核求一次求值所需的量——流体 ALE Navier-Stokes 残差与解析切线、
+    固体质量阵与 StVK 内力/一致切线、以及网格块刚度。
+    """
     flow_residual, flow_tangent = ale_navier_stokes_residual(
         candidate.operators, candidate.flow_values, candidate.ale_context, with_jacobian=True)
     mesh = context.topology.solid_mesh
@@ -727,7 +841,13 @@ def _physics(context, candidate, d_s):
 
 
 def _residual_vector(x, context, candidate, physics):
-    """Constrained global residual; only this function defines ``R(x)``."""
+    """Constrained global residual; only this function defines ``R(x)``.
+
+    中文：定义唯一的全局约束残差 ``R(x)``，按 :data:`BLOCK_NAMES` 顺序拼成。前
+    ``n_velocity+n_pressure`` 行是流体 ALE 残差（其中湿壁与已知速度行用约束替换），随后依次为
+    固体位移行 ``D_BDF d_s - v_s``、固体速度行、网格位移行 ``K_h d_m`` 与界面迹力行
+    ``g - g_f_gamma``；最后一段把被替换行写回约束方程。
+    """
     layout = context.layout
     base = context.base
     topology = context.topology
@@ -741,6 +861,7 @@ def _residual_vector(x, context, candidate, physics):
     residual[:n_velocity+n_pressure] = physics.flow_residual
 
     coefficient = float(context.stencil.coefficients[0])
+    # a_0 是 BDF 当前值系数；D_BDF w = a_0 w + 历史项。
     history_displacement, history_velocity = _solid_history_terms(context)
     d_s = blocks["d_s"].ravel()
     v_s = blocks["v_s"].ravel()
@@ -749,6 +870,8 @@ def _residual_vector(x, context, candidate, physics):
     solid_mesh = topology.solid_mesh
     g = np.asarray(blocks["g"]).ravel()
     interface_load = np.zeros(2*len(solid_mesh.points))
+    # g 为流体作用在固体上的界面迹力（fluid-on-solid，单位 N，已含厚度一次）；
+    # 经 H^T 散射到固体自由度后，以 -interface_load 进入固体动量残差。
     interface_load[topology.solid_dofs] = topology.H.T @ g
     residual[vs0:dm0] = physics.mass @ (coefficient*v_s+history_velocity)+physics.internal-interface_load
 
@@ -756,6 +879,8 @@ def _residual_vector(x, context, candidate, physics):
     residual[g0:] = g-candidate.load.g_f_gamma
 
     # Replaced rows: wet interface rows and prescribed rows.
+    # 中文：以下用约束方程覆盖被替换的行——湿界面行 u_f|Gamma - H v_s|Gamma = 0，
+    # 各 Dirichlet 行（已知值留在残差右侧），以及压力钉行 p_node - value = 0。
     residual[rows.u_interface] = (blocks["u_f"].ravel()[layout.fluid_interface_dofs]
                                   - topology.H @ blocks["v_s"].ravel()[topology.solid_dofs])
     u_dirichlet = vector_values(base.fluid_boundary_velocity,
@@ -792,6 +917,10 @@ def _geometry_columns(operators, flow_values, ale_context):
     and the columns be read off the disjoint row supports.  This is the same
     analytic directional derivative as one call per DOF, only batched (a test
     compares both paths over every column of a small mesh).
+
+    中文：给出几何耦合块 ``J_um``/``J_pm``（流体残差对网格位移 ``d_m`` 的解析交叉导数），
+    按列组装。由于一个单元的残差只依赖本单元顶点，可用冲突图着色把互不影响的网格节点并为
+    一类，每类一次 ``ale_geometry_jvp`` 即可读出各列，结果与逐自由度调用等价，只是批量化。
     """
     mesh = operators.space.mesh
     cells = np.asarray(mesh.cells, dtype=np.int64)
@@ -807,6 +936,8 @@ def _geometry_columns(operators, flow_values, ale_context):
             incident_vertices[node].update((a, b, c))
     # G(v) = nodes whose incident-cell vertices contain v; co-membership in one
     # G(v) is exactly the conflict relation (some incident cells then share v).
+    # 中文：两个网格节点若其关联单元的顶点集有交集，则它们的残差行会重叠，属冲突关系；
+    # 按此冲突图正常着色，同色节点可共享一次 JVP。partners[node] 即 node 的冲突邻居。
     groups = {}
     for node, vertices in enumerate(incident_vertices):
         for vertex in vertices:
@@ -860,6 +991,11 @@ def _load_blocks(context, candidate):
     endpoints); columns outside those supports are structurally zero.  Each
     column is one analytic ``interface_load_jvp`` call, so no chain term is
     added twice.
+
+    中文：装配界面迹力对流体速度/压力、网格位移、固体位移的导数块 ``L_u/L_p/L_dm/L_ds``
+    （即残差 ``R_g`` 对应的 ``-L``）。``g_f_gamma`` 只通过界面所属单元依赖这些量，支撑集之外
+    的列结构为零；每列一次解析 ``interface_load_jvp``，不做重复链式叠加。返回按
+    ``{"velocity","pressure","mesh_displacement","solid_displacement"}`` 索引的 CSR 块。
     """
     topology = context.topology
     operators = candidate.operators
@@ -900,7 +1036,11 @@ def _load_blocks(context, candidate):
 
 
 def _constraint_entries(layout, topology):
-    """COO entries of every replaced row (unit rows and wet interface constraints)."""
+    """COO entries of every replaced row (unit rows and wet interface constraints).
+
+    中文：给出所有被替换行的 COO 三元组——各 Dirichlet 行与压力钉行化为单位行（已知值留在
+    残差里），流体湿界面行与网格湿界面行化为约束方程的导数（对角 1 与 ``-H``/``-1`` 交叉项）。
+    """
     u0, p0, ds0, vs0, dm0, _ = layout.starts
     coo_rows, coo_columns, coo_values = [], [], []
 
@@ -922,15 +1062,18 @@ def _constraint_entries(layout, topology):
     for dof in layout.fluid_interface_dofs.tolist():
         add(u0+dof, u0+dof, 1.0)
     h = topology.H.tocoo()
+    # 流体湿界面行：u_f|Gamma - H v_s|Gamma = 0，故在固体自由度处加 -H 项。
     for row, column, value in zip(h.row.tolist(), h.col.tolist(), h.data.tolist()):
         add(u0+int(layout.fluid_interface_dofs[row]), vs0+int(topology.solid_dofs[column]), -float(value))
     for index, dof in enumerate(layout.mesh_interface_dofs.tolist()):
+        # 网格湿界面行：d_m|Gamma - d_s|Gamma = 0（一一参考匹配，H_d = I）。
         add(dm0+dof, dm0+dof, 1.0)
         add(dm0+dof, ds0+int(topology.solid_dofs[index]), -1.0)
     return np.array(coo_rows, dtype=np.int64), np.array(coo_columns, dtype=np.int64), np.array(coo_values)
 
 
 def _zero_rows(matrix, rows):
+    # 把指定全局行的所有非零元清零（不改结构），用于被替换行；rows 为空则原样返回。
     matrix = csr_matrix(matrix, copy=True)
     if not len(rows):
         return matrix
@@ -942,6 +1085,12 @@ def _zero_rows(matrix, rows):
 
 
 def _assembled_jacobian(context, candidate, physics):
+    """Assemble the complete coupling Jacobian as a 6x6 block sparse matrix.
+
+    中文：装配完整耦合 Jacobian ``dR/dx``（6×6 块稀疏 CSR 矩阵，块布局见模块 docstring）。
+    非零块全部来自共享单场内核的解析切线；被替换行的物理列先清零，再由
+    :func:`_constraint_entries` 叠加约束方程导数。
+    """
     layout = context.layout
     topology = context.topology
     rows = _global_rows(layout)
@@ -956,6 +1105,7 @@ def _assembled_jacobian(context, candidate, physics):
 
     replaced_fluid = np.concatenate((rows.u_interface-u0, rows.u_dirichlet-u0))
     replaced_mesh = np.concatenate((rows.m_interface-dm0, rows.m_dirichlet-dm0))
+    # 被替换行的解析列先清零，稍后由约束行覆盖（否则物理切线与约束行冲突）。
     j_uu = _zero_rows(physics.flow_tangent[:n_velocity, :n_velocity], replaced_fluid)
     j_up = _zero_rows(physics.flow_tangent[:n_velocity, n_velocity:], replaced_fluid)
     j_um = _zero_rows(geometry_u, replaced_fluid)
@@ -971,6 +1121,7 @@ def _assembled_jacobian(context, candidate, physics):
     scatter = coo_matrix((np.ones(2*topology.n_solid_interface_nodes),
                           (topology.solid_dofs, np.arange(2*topology.n_solid_interface_nodes))),
                          shape=(n_solid, 2*topology.n_solid_interface_nodes)).tocsr()
+    # 固体速度行对 g 的导数：-S_s H^T（S_s 选固体界面自由度，H^T 把界面迹力映射到固体）。
     j_sv_g = _zero_rows(-(scatter @ topology.H.T), rows.v_s_dirichlet-vs0)
 
     j_m_m = _zero_rows(physics.mesh_stiffness, replaced_mesh)
@@ -986,6 +1137,7 @@ def _assembled_jacobian(context, candidate, physics):
     j_g_g = _zero(n_flux, n_flux)
     j_g_g.setdiag(1.0)
 
+    # 6×6 块矩阵，行/列块均按 BLOCK_NAMES 顺序 u_f,p_f,d_s,v_s,d_m,g；零块显式填 0。
     matrix = bmat([
         [j_uu, j_up, _zero(n_velocity, n_solid), _zero(n_velocity, n_solid), j_um, _zero(n_velocity, n_flux)],
         [j_pu, _zero(n_pressure, n_pressure), _zero(n_pressure, n_solid), _zero(n_pressure, n_solid), j_pm,
@@ -999,6 +1151,7 @@ def _assembled_jacobian(context, candidate, physics):
         [j_g_u, j_g_p, j_g_ds, _zero(n_flux, n_solid), j_g_dm, j_g_g],
     ], format="csr")
     coo_rows, coo_columns, coo_values = _constraint_entries(layout, topology)
+    # 叠加被替换行：单位行覆盖 Dirichlet/压力钉行，约束导数覆盖湿界面行。
     constraints = coo_matrix((coo_values, (coo_rows, coo_columns)), shape=(layout.n_total, layout.n_total))
     matrix = (matrix+constraints.tocsr()).tocsr()
     matrix.eliminate_zeros()
@@ -1006,7 +1159,12 @@ def _assembled_jacobian(context, candidate, physics):
 
 
 def _jvp_single(context, candidate, physics, q):
-    """One matrix-free directional derivative ``dR[q]`` at the candidate state."""
+    """One matrix-free directional derivative ``dR[q]`` at the candidate state.
+
+    中文：对单个方向 ``q`` 计算 ``dR[q]``，不装配矩阵，只用切线作用与
+    ``ale_geometry_jvp``/``interface_load_jvp`` 的方向导数，逐块拼出结果；被替换行则用约束
+    方程的导数。方向 ``q`` 与输出 ``delta`` 均按 :data:`BLOCK_NAMES` 分块。
+    """
     layout = context.layout
     topology = context.topology
     rows = _global_rows(layout)
@@ -1023,6 +1181,7 @@ def _jvp_single(context, candidate, physics, q):
 
     delta = np.zeros(layout.n_total)
     delta[:n_velocity+n_pressure] = physics.flow_tangent @ np.concatenate((q_u, q_p))
+    # 几何耦合：网格位移方向导数经 ale_geometry_jvp 加到流体残差行（GCL/对流/网格输运各计一次）。
     if np.any(q_dm):
         delta[:n_velocity+n_pressure] += ale_geometry_jvp(candidate.operators, candidate.flow_values,
                                                           ale_context=candidate.ale_context,
@@ -1034,6 +1193,7 @@ def _jvp_single(context, candidate, physics, q):
     delta[dm0:g0] = physics.mesh_stiffness @ q_dm
 
     load_direction = np.zeros(layout.sizes[5])
+    # 界面迹力方向导数：对 u_f/p_f/d_s/d_m 逐个贡献合成。R_g 中为 q_g - load_direction。
     for key, block, name in (("velocity", q_u, "u_f"), ("pressure", q_p, "p_f"),
                              ("solid_displacement", q_ds, "d_s"), ("mesh_displacement", q_dm, "d_m")):
         if not np.any(block):
@@ -1046,6 +1206,7 @@ def _jvp_single(context, candidate, physics, q):
     delta[g0:] = q_g-load_direction
 
     # Replaced rows: derivatives of the constraint equations.
+    # 中文：被替换行（湿界面与 Dirichlet/压力钉行）填入约束方程的方向导数。
     delta[rows.u_interface] = q_u[layout.fluid_interface_dofs]-topology.H @ q_vs[topology.solid_dofs]
     delta[rows.u_dirichlet] = q_u[layout.fluid_dirichlet_dofs]
     pin = layout.pressure_pin
@@ -1068,6 +1229,11 @@ class MonolithicEvaluation:
     block (dimensionless residual monitors), ``geometry_diagnostics`` the
     minimum candidate-geometry quantities and ``timings`` the wall-clock seconds
     of each stage.
+
+    中文：一次整体耦合求值的冻结结果。``residual`` 只读且归本对象所有；``jacobian``（CSR）
+    会冻结其 ``data``/``indices``/``indptr``；``jvp_values`` 为只读副本。``block_norms`` 是
+    逐块无量纲残差监视量 ``||R_b||_2 / max(||x_b||_2, 1)``，``geometry_diagnostics`` 给出
+    候选几何的最小质量量，``timings`` 记录各阶段墙钟秒数。
     """
 
     residual: np.ndarray
@@ -1089,6 +1255,7 @@ class MonolithicEvaluation:
 
 
 def _block_norms(x, residual, layout):
+    # 逐块无量纲残差：||R_b||_2 / max(||x_b||_2, 1)，用于收敛监视。
     norms = {}
     for name in BLOCK_NAMES:
         values = layout.gather(name, x).ravel()
@@ -1121,6 +1288,11 @@ def evaluate_monolithic(x, *, context, mode="residual", directions=None):
     ``(batch, n)``).  The candidate geometry, operators, interface geometry and
     interface load are rebuilt from ``x`` on every call with
     ``context.candidate_id``; nothing is cached and no input is modified.
+
+    中文：求整体耦合残差，可选同时给出 Jacobian 或 JVP。``mode="residual"`` 只返回残差；
+    ``"assembled"`` 额外返回完整耦合 Jacobian；``"jvp"`` 额外返回对 ``directions``（``(n,)``
+    或 ``(batch, n)``）的矩阵无关方向导数。每次调用都用 ``context.candidate_id`` 从 ``x``
+    重建候选几何、算子、界面几何与界面载荷，不缓存、不修改任何输入。
     """
     if mode not in ("residual", "assembled", "jvp"):
         raise ValueError(f"Unknown mode {mode!r}; allowed modes are 'residual', 'assembled' and 'jvp'.")
@@ -1182,12 +1354,18 @@ def evaluate_monolithic(x, *, context, mode="residual", directions=None):
 
 
 def monolithic_residual(x, *, context):
-    """Global constrained residual ``R(x)`` (read-only array)."""
+    """Global constrained residual ``R(x)`` (read-only array).
+
+    中文：返回全局约束残差 ``R(x)``（只读数组），等价于 ``mode="residual"`` 求值。
+    """
     return evaluate_monolithic(x, context=context, mode="residual").residual
 
 
 def monolithic_jacobian(x, *, context):
-    """Complete coupling Jacobian ``dR/dx`` as a frozen CSR matrix."""
+    """Complete coupling Jacobian ``dR/dx`` as a frozen CSR matrix.
+
+    中文：返回完整耦合 Jacobian ``dR/dx``（冻结的 CSR 矩阵），等价于 ``mode="assembled"``。
+    """
     return evaluate_monolithic(x, context=context, mode="assembled").jacobian
 
 
@@ -1195,6 +1373,9 @@ def monolithic_jvp(x, directions, *, context):
     """Matrix-free directional derivative of ``R`` at ``x``.
 
     ``directions`` is ``(n,)`` or ``(batch, n)``; the output has the same shape.
+
+    中文：返回 ``R`` 在 ``x`` 处、沿 ``directions`` 的矩阵无关方向导数；``directions`` 为
+    ``(n,)`` 或 ``(batch, n)``，输出与输入同形状。
     """
     values = np.asarray(directions, dtype=float)
     if values.ndim not in (1, 2):

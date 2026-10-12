@@ -13,6 +13,16 @@ the solid/fluid gap and the minimum Jacobians.  If ``motion`` is omitted the
 current motion stored in the geometry is used.  Passing ``load`` (an
 :class:`InterfaceLoad`) fills the compact/fluid loads from the assembled
 result and adds the node-vs-quadrature traction block.
+
+本模块对固定界面映射做代数自洽性诊断。每次执行的检查都给出显式 ``passed`` 布尔、
+数值与所用尺度；冻结容差规则为 ``<= 1e-12 * S``，其中 ``S = max(显式尺度,
+相关贡献量之和)``。关键约定：缺少输入的检查列入 ``skipped`` 并说明原因，而非静默
+跳过；非有限输入直接拒绝，派生量非有限则对应检查判失败；``configuration`` 为
+``"current"``（提供 ``motion``）或 ``"reference"``。传入 ``geometry``（:class:`InterfaceGeometry`）
+会增加当前构形检查块：两条 ``j_Gamma`` 路径、``n_s + n_f``、Nanson 法向、固流
+间隙与最小雅可比；若省略 ``motion`` 则使用几何中存储的当前运动。传入 ``load``
+（:class:`InterfaceLoad`）会从装配结果填充压缩/流体载荷，并增加节点-对积分面力
+检查块。
 """
 
 from collections.abc import Mapping
@@ -64,7 +74,11 @@ def _explicit_scales(scales):
 
 
 def _effective_scale(explicit, contributions):
-    """Frozen rule ``S = max(explicit scale, sum of relevant contributions)``."""
+    """Frozen rule ``S = max(explicit scale, sum of relevant contributions)``.
+
+    冻结尺度规则：``S = max(显式尺度, 相关贡献量绝对值之和)``。若 ``S <= 0`` 则回退
+    到 1.0（避免零容差），并返回 ``(S, fallback)`` 供调用方记录是否发生回退。
+    """
     total = float(sum(abs(float(value)) for value in contributions))
     scale = max(float(explicit or 0.0), total)
     fallback = scale <= 0.0
@@ -72,10 +86,12 @@ def _effective_scale(explicit, contributions):
 
 
 def _cross_sum(coordinates, loads):
+    # 二维力矩标量：sum(r_x F_y - r_y F_x)，即 r × F 的 z 分量。
     return float(np.sum(coordinates[:, 0] * loads[:, 1] - coordinates[:, 1] * loads[:, 0]))
 
 
 def _contribution_sum(coordinates, loads):
+    # 力矩尺度的贡献量：sum(|r| |F|)，用于冻结容差的尺度估计。
     return float(np.sum(np.linalg.norm(coordinates, axis=1) * np.linalg.norm(loads, axis=1)))
 
 
@@ -103,6 +119,18 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
     and whose node-vs-quadrature totals are checked.  The result has per-check
     ``passed`` flags plus a global ``pass``; failed checks are also summarised
     in ``failures``.
+
+    检查力、力矩、虚功、运动与法向的自洽性。``loads`` 要么是压缩交错固体界面力向量
+    ``(2*n_sG,)``，要么是带可选 ``"compact"``（已映射的固体界面力）与 ``"fluid"``
+    （已积分的流体 P2 对偶节点力）键的映射。``motion`` 为 :class:`InterfaceMotion`：
+    提供时检查使用当前坐标，否则使用参照坐标且 ``configuration="reference"``。
+    ``virtual_solid`` 为压缩虚位移，``motion_residual`` 为 ``(velocity, derivative)``
+    压缩向量对，``analytic_force`` 为期望总力，``current_normals`` 为逐棱当前外法向
+    对 ``(n_s, n_f)``。``geometry`` 增加当前构形检查块，并在省略 ``motion`` 时提供
+    当前运动；``load`` 为已装配的 :class:`InterfaceLoad`，其压缩/流体力填充 ``loads``，
+    并检查其节点-对积分总量。``moment_origin`` 为力矩参考点；``scales`` 可给出
+    length/force/moment/work/velocity 的显式尺度。返回结果含各检查的 ``passed``、
+    全局 ``pass``，失败检查另汇总于 ``failures``。
     """
     if not isinstance(topology, InterfaceTopology):
         raise TypeError("topology must be an InterfaceTopology.")
@@ -169,6 +197,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
 
     X_s = np.asarray(topology.X_s_gamma, dtype=float)
     X_f = np.asarray(topology.X_f_gamma, dtype=float)
+    # 映射自洽：h 每行和应为 1（分区一致性），且 h @ X_s 应重现 X_f（参照坐标匹配）。
     row_sum_error = _max_abs(np.asarray(topology.h.sum(axis=1)).ravel() - 1.0)
     reference_scale = max(float(np.linalg.norm(X_s, axis=1).max()),
                           float(np.linalg.norm(X_f, axis=1).max()))
@@ -179,6 +208,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
     position_fallback = None
     if motion is not None:
         with np.errstate(over="ignore", invalid="ignore"):
+            # 当前构形位置一致性：流体 P2 当前坐标应等于 h 映射后的固体当前坐标。
             current_s = X_s + vertex_values
             predicted_f = np.asarray(topology.h @ current_s)
             current_f = X_f + p2_values
@@ -209,6 +239,8 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
         skipped["total_moment"] = "no compact solid interface loads provided"
     else:
         with np.errstate(over="ignore", invalid="ignore"):
+            # 力守恒：压缩固体界面力之和应与散布后的完整向量之和一致；
+            # 若给出流体力/解析力，则再与其总和比较。
             loads_s = compact.reshape(-1, 2)
             force_compact = loads_s.sum(axis=0)
             full = scatter_solid_load(topology, compact)
@@ -244,6 +276,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
         with np.errstate(over="ignore", invalid="ignore"):
             loads_s = compact.reshape(-1, 2)
             coordinates_s = X_s + vertex_values if motion is not None else X_s
+            # 固体侧力矩：以 origin 为参考点，r × F；再用完整网格坐标重算作对照。
             moment_solid = _cross_sum(coordinates_s - origin, loads_s)
             contributions = [_contribution_sum(coordinates_s - origin, loads_s)]
             coordinates_full = np.asarray(topology.solid_mesh.points, dtype=float).copy()
@@ -283,6 +316,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
         skipped["virtual_work"] = "no virtual displacement provided"
     else:
         delta_solid = _finite_vector(virtual_solid, 2 * n_solid, "virtual_solid")
+        # 固体虚位移经 H 映射为流体 P2 迹虚位移，用于两侧虚功对比。
         delta_fluid = np.asarray(topology.H @ delta_solid)
         if virtual_fluid is not None:
             given_fluid = _finite_vector(virtual_fluid, 2 * n_fluid, "virtual_fluid")
@@ -338,6 +372,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
     with np.errstate(over="ignore", invalid="ignore"):
         normals_s = np.asarray(topology.N_s, dtype=float)
         normals_f = np.asarray(topology.N_f, dtype=float)
+        # 参照法向检查：两域外法向应相反 (n_s + n_f ≈ 0) 且各自单位化。
         normal_error = float(np.max(np.linalg.norm(normals_s + normals_f, axis=1)))
         normalization_error = float(max(
             np.max(np.abs(np.linalg.norm(normals_s, axis=1) - 1.0)),
@@ -371,6 +406,8 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
     geometry_block = None
     if geometry_object is not None:
         with np.errstate(over="ignore", invalid="ignore"):
+            # 两条面积比路径（当前长度比与 Nanson）应一致；几何块还检查 Nanson 法向
+            # 误差、固流间隙与固体/流体最小雅可比为正。
             ratio_error = float(np.max(np.abs(geometry_object.j_Gamma_current
                                                   - geometry_object.j_Gamma_nanson)))
             ratio_scale, ratio_fallback = _effective_scale(
@@ -406,6 +443,7 @@ def interface_diagnostics(topology, *, motion=None, loads=None, moment_origin=(0
     traction = None
     if load_object is not None:
         with np.errstate(over="ignore", invalid="ignore"):
+            # 已装配面力的节点总量应与直接积分总量、流体力总量一致（力与力矩）。
             force_error = float(np.max(np.abs(load_object.total_force-load_object.total_force_quadrature)))
             force_fluid_error = float(np.max(np.abs(load_object.total_force-load_object.total_force_fluid)))
             moment_error = abs(load_object.total_moment-load_object.total_moment_quadrature)

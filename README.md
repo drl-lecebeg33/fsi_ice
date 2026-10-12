@@ -1,6 +1,6 @@
 # fsi_ice
 
-基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M4 已完成：数值基础、单场、ALE、界面、事务、固定/Aitken 分区算法及稳态 FSI1 均有本地验证证据。当前停在 M5 整体耦合入口；FSI2 尚未实现。
+基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M5 已完成：数值基础、单场、ALE、界面、事务、分区算法（固定松弛/Aitken）、稳态 FSI1，以及整体耦合（统一残差、完整耦合 Jacobian、整体 Newton、伪时间定常推进）与同一离散配置下的一致性/成本比较均有本地验证证据。当前停在 M6（FSI2 与算法实验）入口；FSI2 尚未实现。
 
 ## 项目文档
 
@@ -65,7 +65,7 @@ T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格�
 
 包安装后，`python -m fsi_ice` 或控制台命令 `fsi-ice` 均可从其他目录运行；此时配置和输出路径按当前工作目录解释。`test` 为开发入口，需要保留本地项目及测试目录。
 
-最新全量回归 **432 项通过**；包含 T18/T19 分区耦合及 T20 FSI1 网格、稳态求解、重复性和失败处理检查。历史证据见 [M0 记录](docs/validation/m0.md)、[T19 验收](docs/validation/t19.md) 和 [T20 验收](docs/validation/t20.md)。
+最新全量回归 **557 项通过、2 项跳过**（M5 冻结状态）；除单场、T18/T19 分区耦合与 T20 FSI1 外，包含 T21/T22 整体残差/Newton 与 T23 一致性、成本检查。历史证据见 [M0 记录](docs/validation/m0.md)、[T19 验收](docs/validation/t19.md)、[T20 验收](docs/validation/t20.md) 与 [M5 矩阵](docs/validation/m5.md)。
 
 ## 固体与流体验证
 
@@ -107,3 +107,21 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m fsi_ice partitioned
 验证使用固定参考几何上的 BDF1 单步、非定常 Stokes 和线弹性动力学，比较分区解与相同离散方程的块直接解。保存 `report.json`、`iterations.csv` 和 `solution.npz`；配置读取、解析或校验失败以及求解或写出失败都会清除旧报告和旧解并保存 `failure.json`（输入失败保留配置路径与故障阶段，不声称已加载无效配置）。正式 FSI1 将在 T19/Aitken 及 T20 完成后独立验收。
 
 `fsi_ice.coupling` 提供 `DirichletNeumannMap` 和 `solve_dirichlet_neumann`：依次调用流体求解、载荷传递、固体求解及界面提取回调，逐分量尺度必须显式提供。以未松弛界面残差判定收敛；收敛结果保留最后评估的输入与对应单场状态。回调应检查物理残差并在失败时抛出异常，且始终使用同一步已接受历史；成功后的统一时间接受由外层全场事务负责。接口、尺度和退出条件见 T18 计划。
+
+## 整体耦合验证（M5）
+
+整体耦合（统一残差、完整耦合 Jacobian、矩阵自由 JVP、整体 Newton）位于 `fsi_ice.coupling`：求值入口 `monolithic_residual` / `monolithic_jacobian` / `monolithic_jvp` / `evaluate_monolithic`（模式 `residual|assembled|jvp`），Newton 与定常推进 `monolithic_newton.solve_monolithic_step` / `march_to_steady`（伪时间 BDF 推进至定常固定点）。接口、门槛与实测见 [T21 记录](docs/validation/t21.md)、[T21 独立复核](docs/validation/t21_review.md) 与 [T22 记录](docs/validation/t22.md)。
+
+运行 T23 一致性与成本比较（h=0.02 同一网格，同机单线程；整体推进逐档热启动，单档约 3–15 分钟）：
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py prepare
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py partitioned \
+  --methods fixed,aitken --levels 1e-6,1e-8,1e-10 --repeats 3
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py monolithic \
+  --level 1e-6 --dt 1.0 --order 2 --chunk-steps 5 --max-steps 40 --wall-seconds 2400
+# 再依次对 --level 1e-8、1e-10 重复（逐档热启动），最后：
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py compare --levels 1e-6,1e-8,1e-10
+```
+
+结果写入 `results/m5/t23/`（配置快照、环境与线程记录、各方法输出、`comparison/consistency_per_variable.csv`、`comparison/cost_per_item.csv`、`comparison/summary.json`）。1e-10 档三种方法逐变量一致（最不利裕度比 0.984）；成本表包含组装/线性求解/Newton/耦合/失败步等项。验收矩阵与全部条目状态见 [M5 矩阵](docs/validation/m5.md)，完整命令、失败修正与记录项见 [T23 记录](docs/validation/t23.md)。

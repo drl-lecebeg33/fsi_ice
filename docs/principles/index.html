@@ -15,6 +15,7 @@
   h1 { font-size:1.5rem; margin:0 0 .3rem; }
   h2 { font-size:1.15rem; margin:2rem 0 .6rem; padding-bottom:.3rem; border-bottom:1px solid var(--line); }
   h3 { font-size:1rem; margin:1.2rem 0 .4rem; }
+  h4 { font-size:.95rem; margin:1rem 0 .3rem; }
   p, li { font-size:.98rem; }
   code { background:var(--code); padding:.1rem .35rem; border-radius:4px;
          font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size:.9em; }
@@ -81,8 +82,8 @@
 <section id="status">
   <h2>现在做到哪一步</h2>
   <div class="note">
-    截至 2026-10-11：<strong>M0–M4 已完成并通过本地数值验收</strong>（数值基础、固体、流体、ALE/界面/全场事务、分区耦合与稳态 FSI1）。
-    完整瞬态 FSI、整体耦合和 FSI2 尚未实现。下面用三档标记，避免把计划当成成果。
+    截至 2026-10-12：<strong>M0–M5 已完成并通过本地数值验收</strong>（在 M0–M4 基础上，整体耦合的统一残差、完整耦合 Jacobian、整体 Newton 与伪时间定常推进已交付并验证；h=0.02 上分区与整体在收紧容差后得到一致离散解；其中一项物理门槛在该网格上按字面记为 failed，属网格分辨率限制，详见耦合章节）。
+    完整瞬态 FSI（FSI2）与 IQN-ILS 尚未实现；Krylov 预条件实用化、与时间事务/CLI 的衔接、最细网格整体稳态仍为计划。下面用三档标记，避免把计划当成成果。
   </div>
   <p>
     <span class="badge b-impl">已实现</span> 代码存在 ·
@@ -118,9 +119,16 @@
         <td>FSI1 最细网格 y 位移误差 4.076%、阻力误差 0.394%（门槛 5%）；<a href="../validation/t18.md">T18</a>、<a href="../validation/t19.md">T19</a>、<a href="../validation/t20.md">T20</a></td>
       </tr>
       <tr>
-        <td>M5 整体耦合：统一残差、含界面/网格依赖的耦合 Jacobian、Newton 求解</td>
+        <td>M5 整体耦合：统一残差、含界面/网格依赖的耦合 Jacobian、整体 Newton 与伪时间定常推进</td>
+        <td><span class="badge b-ver">已验证</span></td>
+        <td>方向导数最佳相对误差 7.39e-11（门槛 1e-5；独立复核 2.30e-11–5.56e-11）；h=0.02 与分区 fixed/Aitken 在 1e-10 档逐变量一致；
+            <a href="../validation/t21.md">T21</a>、<a href="../validation/t21_review.md">T21 复核</a>、<a href="../validation/t22.md">T22</a>、
+            <a href="../validation/t23.md">T23</a>、<a href="../validation/m5.md">M5 矩阵</a>、<a href="../development/m5_freeze.md">接口冻结</a></td>
+      </tr>
+      <tr>
+        <td>M5 剩余（计划）：Krylov 预条件实用化、时间事务/CLI 衔接、最细网格整体稳态与跨网格一致性</td>
         <td><span class="badge b-plan">计划</span></td>
-        <td>—</td>
+        <td>无预条件 GMRES 在 264 个未知量上不收敛（<a href="../validation/t22.md">T22 §8</a>）；矩阵条目 22-04 保持 not_executed（<a href="../validation/m5.md">m5.md</a>）；未接入 CLI 与 <code>StepTransaction</code>；h=0.0075 未做整体推进（<a href="../validation/t23.md">T23 §11</a>）</td>
       </tr>
       <tr>
         <td>M6 FSI2 瞬态、IQN-ILS、四种耦合算法公平比较与报告</td>
@@ -130,7 +138,8 @@
     </tbody>
   </table>
   <p class="muted">
-    当前全量回归 <strong>432 项测试通过</strong>（本页维护时本地实际运行，约 124 s）。
+    M5 冻结状态的全量回归为 <strong>557 项通过、2 项跳过</strong>（记录见 <a href="../../gola.md">gola.md</a> M5 状态；
+    本次文档维护只做文档检查，<strong>未重跑全量回归</strong>）。
     测试通过只表示预设检查通过；没有证据的功能不在此写"已验证"。
   </p>
 </section>
@@ -354,9 +363,216 @@
     第一次正式运行最细网格为 5.449%，报告为 FAIL——修正方式是继续加密网格（新增 h=0.0075），
     而不是放宽门槛；这也是本项目验证纪律的例子。
   </p>
+  <h3 id="monolithic">整体耦合：所有场放进同一个方程组（M5）<span class="badge b-ver">已验证</span></h3>
   <p>
-    <strong>整体耦合（计划，M5）：</strong>把所有场的未知量放进同一个非线性方程组，用包含界面与网格依赖的完整 Jacobian 做牛顿迭代。
-    它与分区耦合共享同一套残差与物理模型，验收标准是在相同离散下两种方法收紧容差后得到一致解。
+    <strong>要解决什么问题。</strong>分区耦合把流体和固体分开轮流解，在外层反复迭代界面条件；
+    当两边耦合很强时，外层迭代可能很慢甚至不收敛。整体耦合换一个做法：
+    把流体、固体、动网格和界面力的全部未知量放进<strong>同一个非线性方程组</strong>，
+    用牛顿法让所有方程同时成立，不需要外层耦合迭代。
+    它与分区耦合使用<strong>同一套网格、材料、边界、时间离散和物理残差</strong>，只是组合与求解方式不同；
+    在相同离散下公平比较两种方法，正是本项目要回答的问题（<a href="../../spec.md">spec.md</a> §3.3、§5.3）。
+  </p>
+  <p>
+    <strong>过程。</strong>整体法把一次求值写成一个纯函数 <code>x ↦ R(x)</code>：给候选状态 x，算出"方程还差多少"的残差向量 R；
+    牛顿法再反复解线性方程 <code>J·Δx = −R</code> 修正 x（J 是 R 对 x 的导数）。
+    求值入口在 <a href="../../src/fsi_ice/coupling/monolithic.py">coupling/monolithic.py</a>，
+    牛顿迭代与定常推进在 <a href="../../src/fsi_ice/coupling/monolithic_newton.py">coupling/monolithic_newton.py</a>、
+    <a href="../../src/fsi_ice/coupling/newton.py">coupling/newton.py</a>。
+    下面依次说明未知量、残差、Jacobian、方向导数验证、Newton 与定常推进。
+  </p>
+
+  <h4>未知量 x 的六个块</h4>
+  <p>x 按固定顺序分块，二维节点量按"节点优先、x/y 交错"存放；各块切片与形状由 <code>BlockLayout</code> 记录并校验：</p>
+  <figure>
+    <svg viewBox="0 0 900 120" width="100%" role="img" aria-label="整体未知量 x 的六个块示意">
+      <g font-size="12" text-anchor="middle" fill="#1a1a1a">
+        <text x="40" y="16" text-anchor="start" font-size="11" fill="#5c6470">x = [</text>
+        <g>
+          <rect x="40" y="24" width="130" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="105" y="45">u_f</text><text x="105" y="62" font-size="10" fill="#5c6470">流体速度 P2</text>
+        </g>
+        <g>
+          <rect x="182" y="24" width="110" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="237" y="45">p_f</text><text x="237" y="62" font-size="10" fill="#5c6470">压力 P1</text>
+        </g>
+        <g>
+          <rect x="304" y="24" width="120" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="364" y="45">d_s</text><text x="364" y="62" font-size="10" fill="#5c6470">固体位移 P1</text>
+        </g>
+        <g>
+          <rect x="436" y="24" width="120" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="496" y="45">v_s</text><text x="496" y="62" font-size="10" fill="#5c6470">固体速度 P1</text>
+        </g>
+        <g>
+          <rect x="568" y="24" width="135" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="635" y="45">d_m</text><text x="635" y="62" font-size="10" fill="#5c6470">网格位移 P1</text>
+        </g>
+        <g>
+          <rect x="715" y="24" width="145" height="48" rx="8" fill="#f4f6f8" stroke="#c8cfd6"/>
+          <text x="787" y="45">g</text><text x="787" y="62" font-size="10" fill="#5c6470">界面对偶力 P2 迹</text>
+        </g>
+        <text x="860" y="16" font-size="11" fill="#5c6470">]</text>
+        <text x="40" y="100" text-anchor="start" font-size="11" fill="#5c6470">名称后缀 _f / _s / _m 分别表示流体 / 固体 / 网格。</text>
+      </g>
+    </svg>
+    <figcaption>整体未知量 x 的六个块（示意，非计算结果）。</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>块</th><th>含义</th><th>离散 / 说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>u_f</code></td><td>流体速度</td><td>P2（Taylor–Hood），形状 (n_P2, 2)</td></tr>
+      <tr><td><code>p_f</code></td><td>流体压力</td><td>P1，形状 (n_P1,)</td></tr>
+      <tr><td><code>d_s</code> / <code>v_s</code></td><td>固体位移 / 速度（参考构形）</td><td>P1 总拉格朗日 StVK，各 (n_s, 2)</td></tr>
+      <tr><td><code>d_m</code></td><td>流体参考网格位移；候选几何为 <code>X + d_m</code></td><td>P1，形状 (n_f1, 2)</td></tr>
+      <tr><td><code>g</code></td><td>流体 P2 界面迹上的对偶节点力；顺序同界面载荷组装，厚度只计一次，符号为"流体对固体"</td><td>P2 迹，形状 (n_fG, 2)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>六行残差分别表示什么</h4>
+  <p>
+    把同一个 x 代入六个方程就得到六行残差。每一行都<strong>复用单场物理核</strong>（不重写一套物理公式），只是接受来自其他块的输入：
+  </p>
+  <ul>
+    <li><strong>流体动量与连续性 <code>R_u</code>、<code>R_p</code></strong>：在 d_m 给出的候选几何上调用 ALE Navier–Stokes 残差核（含 GCL 扫掠通量与相对速度对流）。
+      已知速度的边界行改写为 <code>u_f − u_D</code>；湿界面上的流体 P2 迹行改写为界面运动连续条件
+      <code>G_f u_f − H G_s v_s</code>，即流体界面速度必须等于固体界面速度经映射 H 后的值。</li>
+    <li><strong>固体运动学 <code>R_sd</code></strong>：<code>D_BDF d_s − v_s = 0</code>。
+      BDF 差分算子 D 把当前位移与已接受历史组合成时间导数，这一行表示"速度就是位移的时间导数"。</li>
+    <li><strong>固体动量 <code>R_sv</code></strong>：<code>M_s D_BDF v_s + f_int(d_s) − f_body − Hᵀ g = 0</code>，
+      即惯性 + 内力 − 体力 − 界面力；<code>Hᵀ g</code> 把流体给的界面力对偶地转到固体节点上，保证离散虚功一致。</li>
+    <li><strong>网格约束 <code>R_m</code></strong>：自由行是调和方程 <code>K_h d_m = 0</code>（复用调和延拓的刚度矩阵）；
+      湿顶点行直接写 <code>d_m|Γ = d_s|Γ</code>（参考构形一一匹配）；其他外边界行取规定值。
+      这样网格既跟着固体动，又不会翻转或与固体脱开。</li>
+    <li><strong>界面载荷一致性 <code>R_g</code></strong>：<code>g − g_f_gamma(u_f, p_f, d_m, d_s) = 0</code>；
+      界面力未知量必须等于用当前解在候选界面几何上积出的流体牵引力（含 Nanson 参考/当前构形转换），否则两侧受力对不上。</li>
+  </ul>
+  <p>
+    <strong>约束行与压力规范。</strong>已知值（Dirichlet）和耦合约束用"行替换"改写成单位行或约束方程本身，已知值留在残差里；
+    压力可用可选的 pin 行 <code>p_i − p_ref</code> 固定一个参考值（<code>PressurePin</code>，<code>None</code> 合法）。
+    FSI1 一致性比较两侧都用 <code>pressure_pin=None</code>（出口自然边界定压，见 <a href="../development/m5_freeze.md">m5_freeze.md</a> M-3）。
+    R(x) 是 x 的纯函数：不修改输入、历史与参考网格，相同输入重复求值逐位一致。
+  </p>
+
+  <h4>完整耦合 Jacobian：每条依赖链只计一次</h4>
+  <p>
+    牛顿法需要 <code>J = ∂R/∂x</code>。按"行块 × 列块"写出，它是一个分块矩阵；0 表示该行在物理上不依赖该块。
+    表中 I 是单位块，a₀ 是 BDF 时间系数：
+  </p>
+  <table>
+    <thead><tr><th>行块 \ 列块</th><th>u_f</th><th>p_f</th><th>d_s</th><th>v_s</th><th>d_m</th><th>g</th></tr></thead>
+    <tbody>
+      <tr><td>R_u</td><td>J_uu</td><td>J_up</td><td>0</td><td>0</td><td>J_um</td><td>0</td></tr>
+      <tr><td>R_p</td><td>J_pu</td><td>0</td><td>0</td><td>0</td><td>J_pm</td><td>0</td></tr>
+      <tr><td>R_sd</td><td>0</td><td>0</td><td>a₀I</td><td>−I</td><td>0</td><td>0</td></tr>
+      <tr><td>R_sv</td><td>0</td><td>0</td><td>K_s</td><td>a₀M_s</td><td>0</td><td>−Hᵀ</td></tr>
+      <tr><td>R_m</td><td>0</td><td>0</td><td>J_m_ds</td><td>0</td><td>K_h</td><td>0</td></tr>
+      <tr><td>R_g</td><td>−L_u</td><td>−L_p</td><td>−L_ds</td><td>0</td><td>−L_dm</td><td>I</td></tr>
+    </tbody>
+  </table>
+  <p>耦合来自两条链，分别由两个方向导数（JVP）核覆盖，互不重复：</p>
+  <ul>
+    <li><strong>几何链（<code>ale_geometry_jvp</code>）</strong>：固体位移经网格约束影响 d_m，d_m 改变候选几何、GCL 扫掠通量、历史质量、对流与网格输运；
+      这些"对流体的影响"一次算清，构成 J_um/J_pm 与网格行的 J_m_ds。</li>
+    <li><strong>载荷链（<code>interface_load_jvp</code>）</strong>：界面牵引积分对速度（L_u）、压力（L_p）、网格位移（L_dm）、固体位移（L_ds）的导数，
+      构成 R_g 行的非对角块；R_sv 行再通过 Hᵀ 使用 g。</li>
+  </ul>
+  <p>
+    <strong>怎么证明没有漏项。</strong>把任一耦合矩形块从 J 中删掉再与中心差分对照：全项误差在 1e-10 量级，
+    删掉一个块后会跳到 1e-4–1e-2 量级，说明该块确实被方程使用。T21 对 8 个耦合矩形块做了这种"删块完整性审计"；
+    每个块的导数来源记录在 <code>JACOBIAN_BLOCK_SOURCES</code> 中。唯一的近似是"可调用体力"在几何方向导数里用固定步长中心差分
+    （<code>BODY_FORCE_DIFFERENCE_STEP</code>），已单独用中心差分对照，其余全部解析。
+  </p>
+
+  <h4>怎么确认方向导数算得对</h4>
+  <p>
+    做法是<strong>中心差分</strong>：在状态 x 上取一个方向 q，对步长 h 计算数值差商 <code>(R(x+hq) − R(x−hq)) / (2h)</code>，
+    再与解析的 J·q 比较。h 太大时截断误差占主导，太小时舍入误差占主导，所以对 h 从 1e-2 扫到 1e-10，观察相对误差"先降后升"；
+    按 <a href="../../spec.md">spec.md</a> §5.2 事先冻结的门槛，取全扫描中的<strong>最佳相对误差 ≤ 1e-5</strong>。
+    不同行残差单位不同（力、质量收支、位移等），比较前用逐块显式物理尺度归一化（如长度 1 m、速度 0.05 m/s、压力 0.01 Pa、力 0.01 N）。
+  </p>
+  <p>
+    实测（小问题、真实有限元离散）：六块混合方向最佳相对误差 <strong>7.39e-11</strong>（h=1e-6）；
+    三类独立自选方向（光滑、随机、含界面链）最佳 2.30e-11–5.56e-11；
+    装配 Jacobian 与矩阵自由 JVP 的相对差 ≤1.9e-16；本应为零的响应方向绝对误差为 0；
+    H、Hᵀ、BDF 相容行、厚度只计一次等恒等式独立抽查误差在 0–2.8e-17 量级。
+    证据：<a href="../validation/t21.md">T21 记录</a>、<a href="../validation/t21_review.md">T21 独立复核</a>；
+    工具与测试：<a href="../../src/fsi_ice/validation/monolithic.py">validation/monolithic.py</a>、
+    <a href="../../tests/test_monolithic_residual.py">test_monolithic_residual.py</a>、
+    <a href="../../tests/test_monolithic_review.py">test_monolithic_review.py</a>。
+  </p>
+
+  <h4>整体 Newton：阻尼线搜索与收敛判据</h4>
+  <p>
+    每个 Newton 迭代解一次线性系统 <code>J·Δx = −R</code>，再沿 Δx 试探新点。
+    试探从完整步长 α=1 开始；只有新残差的原始二范数满足 Armijo 充分下降（slope=1e-4）才接受，
+    否则把 α 减半重试（最多 30 次回溯、不低于 2⁻²⁴）。这条<strong>阻尼/回溯线搜索</strong>让远处的初值也能稳定靠近解。
+  </p>
+  <p>
+    判断是否收敛用<strong>逐分量尺度归一化的无穷范数</strong>：<code>max_i |R_i|/S_i ≤ atol + rtol·‖R0‖_S</code>，
+    S 由调用者按块显式给出，R0 是迭代起点的残差。线搜索用原始残差范数判断下降（避免各块尺度相差悬殊时误拒全步长），
+    收敛才用归一化判据——两者分工不同，代码内有注释与回归测试。
+    T22 小问题（264 个未知量）用 rtol=1e-8、atol=1e-10，4 次迭代后 ‖R‖_S=9.17e-10（阈值 4.66e-5），尾部呈二次收敛趋势。
+  </p>
+  <p>
+    <strong>失败必须响亮。</strong>不收敛、回溯失败、线性系统奇异、NaN/Inf 都会抛出带 <code>phase</code>（residual/evaluate/linear_solve/line_search/convergence）、
+    <code>iteration</code>、残差范数与诊断映射的 <code>MonolithicNewtonFailure</code>，并保留已完成步的计数与记录；
+    T22 注入的六类失败都按预期抛出，失败后基础状态逐位不变，撤销注入后重解与基线一致。被拒绝的试探点只付残差评估成本，切线只在接受的迭代点组装。
+  </p>
+  <p>
+    <strong>两条切线路由，不静默切换。</strong><code>jacobian_mode="assembled"</code>（默认）在接受的迭代点组装 J 并用直接分解（splu）求解；
+    <code>"jvp"</code> 用矩阵自由算子，每次 GMRES 内迭代只乘一次方向导数。路由、线性求解器与各自计数都写进结果；
+    切线不可用或线性求解失败直接报错，绝不自动换算法。jvp 路由已用小问题加"精确预条件"验证接线与计数，
+    但无预条件 GMRES 在 264 个未知量上已不收敛——让 Krylov 路径可用于真实问题需要预条件，这是当前的计划项。
+  </p>
+
+  <h4>从瞬态推进到定常：伪时间 BDF</h4>
+  <p>
+    整体残差用的是<strong>时间步格式</strong>：BDF 用当前步与已接受历史算时间导数
+    <code>D_BDF x = a₀x + Σ_{j≥1} a_j x^(k−j)</code>（系数由 dt 与阶次决定，见 <a href="../../src/fsi_ice/time/bdf.py">time/bdf.py</a>）。
+    定常（稳态）意味着状态不再随时间变化：固定点上 BDF 模板系数满足 <code>Σa_j = 0</code>，时间项精确抵消，
+    步残差就退化为稳态离散方程。于是不必另写一个稳态求解器：
+    用伪时间 BDF 一步步向前走，每步 Newton 收敛后接受为新历史，直到状态不再变化，<strong>固定点就是稳态离散解</strong>。
+  </p>
+  <p>
+    <strong>停机判据与成本。</strong>停机看"尺度化时间项" <code>T_b = max_i |a₀x_i + Σ a_j x_i^(k−j)| / S_i</code>，
+    只对含时间导数的三块（<code>u_f</code>、<code>d_s</code>、<code>v_s</code>）取最大，当 <code>max_b T_b ≤ steady_tolerance</code> 时判定到达稳态；
+    跑满步数则如实返回"未到稳态"，不假装成功。
+    T22 小问题用 dt=0.5 与 0.25 两轮都推进到稳态（末步时间项 6.3e-12 / 2.0e-11），两个 dt 的固定点逐块差最大 2.1e-9（压力块），其余 ≤1.8e-10、位移类约 1e-14；
+    固定点处步残差与自一致稳态残差逐位相同，再从行进解解一步需要 0 次 Newton。
+    T23 在真实 FSI1 网格（h=0.02）从零态推进：1e-10 档 8 步、8 次 Newton、约 178 s 达到固定点。
+    成本口径记录伪时间步数、Newton 次数、组装/线性求解耗时与时间项收敛值（见 <a href="../validation/t23.md">T23 记录</a> §8），便于与分区法对照。
+  </p>
+
+  <h4>当前做到哪一步</h4>
+  <p>
+    <span class="badge b-ver">已验证</span>
+    统一残差与含界面/网格依赖的完整耦合 Jacobian（T21，含独立复核）；
+    整体 Newton、失败诊断与伪时间定常推进（T22）；
+    FSI1 h=0.02 上分区 fixed/Aitken 与整体在 1e-10 档逐变量一致（T23：位移差 4.3e-15 m、速度差 1.6e-11 m/s、压力差 3.0e-10 Pa、界面载荷差 1.6e-12 N/m，均远小于判据；三种方法的物理误差彼此一致）。
+  </p>
+  <p>
+    <strong>如实记录两点。</strong>其一，h=0.02 网格上 tip_y（31.68%）与 lift（0.1065 N/m）不满足 spec 的字面门槛；
+    但三种方法数值逐位一致，也与 T20 的 h=0.02 基线逐位一致，属网格分辨率限制而非耦合差异——
+    T20 最细网格 h=0.0075 满足全部四项（tip_y 4.08%、drag 0.39%、tip_x 2.95e-7 m、lift 0.0136 N/m，只读引用）；按纪律记为 failed，未放宽门槛。
+    其二，同配置下整体成本高约两个数量级（h=0.02 每档约 169–890 s，分区约 6–25 s），主要来自每次约 18–20 s 的 Jacobian 组装与伪时间步数。
+  </p>
+  <p>
+    <strong>计划 / 未实现：</strong><span class="badge b-plan">计划</span>
+    Krylov 路径的预条件实用化（无预条件 GMRES 不收敛）、与时间事务（<code>StepTransaction</code>）的衔接（矩阵条目 22-04 保持 not_executed）、
+    CLI 子命令集成、最细网格上的整体稳态与跨网格一致性、FSI2 瞬态基准与 IQN-ILS（M6）。
+    这些内容没有本地验证证据，保持"计划"标记。
+  </p>
+  <p class="muted">
+    <strong>证据：</strong><a href="../development/m5_freeze.md">M5 接口冻结与裁决</a>、<a href="../validation/m5.md">M5 验收矩阵</a>、
+    <a href="../validation/t21.md">T21 残差/Jacobian</a>、<a href="../validation/t21_review.md">T21 独立复核</a>、
+    <a href="../validation/t22.md">T22 整体 Newton/定常推进</a>、<a href="../validation/t23.md">T23 FSI1 一致性/成本</a>；
+    代码 <a href="../../src/fsi_ice/coupling/monolithic.py">coupling/monolithic.py</a>、
+    <a href="../../src/fsi_ice/coupling/monolithic_newton.py">coupling/monolithic_newton.py</a>、
+    <a href="../../src/fsi_ice/coupling/newton.py">coupling/newton.py</a>；
+    测试 <a href="../../tests/test_monolithic_residual.py">test_monolithic_residual.py</a>、
+    <a href="../../tests/test_monolithic_review.py">test_monolithic_review.py</a>、
+    <a href="../../tests/test_monolithic_newton.py">test_monolithic_newton.py</a>、
+    <a href="../../tests/test_m5_consistency.py">test_m5_consistency.py</a>。
   </p>
   <p>
     <strong>FSI2 与算法比较（计划，M6）：</strong>FSI1 是稳态基准——流过圆柱的流体给弹性梁一个稳定推力；
@@ -385,7 +601,7 @@
     <li><strong>守恒与对偶</strong>：质量收支、几何守恒（GCL）、界面虚功/功率、总力与总矩、作用力反作用力。</li>
     <li><strong>与公开参考比较</strong>：CSM/CFD/FSI1 数值对照 Turek–Hron 基准与 FeatFlow 官方结果，使用核验过的来源与单位。</li>
     <li><strong>重复性与失败注入</strong>：重复运行逐位一致；人为制造失败验证回滚与重试等价于冷启动；失败不保留旧 PASS。</li>
-    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行全部测试（当前 432 项），相关领域另跑专项回归。</li>
+    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行全部测试（M5 冻结状态为 557 项通过、2 项跳过；本页维护不重跑数值测试），相关领域另跑专项回归。</li>
   </ul>
   <p>
     每项功能的验证日期、命令、环境、参数、预期标准、实测结果与结论记录在
@@ -401,7 +617,7 @@
     <a href="../../requirements.txt">requirements.txt</a>；重建说明见 <a href="../environment.md">环境记录</a>）。
     常用命令（在项目根目录）：
   </p>
-  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（当前 432 项）
+  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（M5 冻结状态 557 通过、2 跳过）
 .venv/bin/python -m fsi_ice poisson    --config cases/poisson_sine.json --output results/poisson
 .venv/bin/python -m fsi_ice single-fields --config cases/single_fields.json --output results/single_fields
 .venv/bin/python -m fsi_ice partitioned-check --config cases/partitioned_check.json --output results/t18/check
@@ -438,6 +654,22 @@
         <td>耦合</td>
         <td>第 2 次维护：coupling 节补充 FSI2 与 IQN-ILS 的“计划”概念描述（FSI2 是瞬态响应基准，需测稳定周期区间的位移振幅 / 阻力均值 / 主频；IQN-ILS 用历史残差预测下一步松弛，是更聪明的分区加速），并说明 M6 要在同一种瞬态离散下公平比较固定松弛 / Aitken / IQN-ILS / 整体 Newton 的精度与成本。状态表未改动，M5/M6 仍标记为“计划”</td>
         <td>本次仅文档维护：61 条唯一本地 href 全部解析、9 个 fragment 锚点对应有效 id、HTML 标签平衡、0 外链脚本与样式、中文编码无乱码；未改动求解逻辑，未重跑数值测试。FSI1 数据沿用初版记录（<a href="../validation/t20.md">T20</a>）</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td>
+        <td>状态、耦合、运行</td>
+        <td>第 3 次维护：把 M5 整体耦合从“计划”更新为“已验证”，并新增整体耦合小节——
+            未知量 x 的六个块与示意图、六行残差（流体/固体/网格/界面）、含界面与网格依赖的完整耦合 Jacobian 及“每条链只计一次”原则、
+            方向导数中心差分与 eps 扫描（门槛 1e-5）、阻尼 Newton 与逐分量尺度收敛判据、伪时间 BDF 定常推进与成本口径；
+            明确列出仍为计划的内容（Krylov 预条件、事务/CLI 衔接、最细网格整体稳态、FSI2、IQN-ILS），并如实记录 h=0.02 物理门槛 failed 的原因；
+            状态表新增“M5 剩余（计划）”行，全量回归记录更新为 M5 冻结状态 557 通过、2 跳过</td>
+        <td>证据：<a href="../development/m5_freeze.md">m5_freeze.md</a>、<a href="../validation/m5.md">m5.md</a>、<a href="../validation/t21.md">t21.md</a>、
+            <a href="../validation/t21_review.md">t21_review.md</a>、<a href="../validation/t22.md">t22.md</a>、<a href="../validation/t23.md">t23.md</a>、
+            <a href="../../gola.md">gola.md</a>（M5 状态与全量回归 557 通过 / 2 跳过）。
+            本次仅文档维护：Python 标准库脚本检查 HTML 标签平衡、id 唯一、全部本地 href/src 目标存在、同页与跨文件 fragment 锚点有效、
+            0 外链脚本与样式、UTF-8 无乱码，全部通过；本机无可用无头浏览器，未做视觉截图检查，布局仅做静态复查
+            （导航 flex-wrap、表格 overflow-wrap、代码块 overflow-x:auto、新增 SVG 带 viewBox+width=100%、CSS 中唯一像素宽度为 main 的 max-width:900px 收缩容器）；
+            未改动求解逻辑，未重跑数值测试</td>
       </tr>
     </tbody>
   </table>

@@ -251,3 +251,45 @@ T18 完成；T19/Aitken 是下一个工作包，T20/正式 FSI1 保持未开始�
 2026-10-11 修复轮：A7 复核登记的 D1（CLI 输入失败残留旧成功产物）与 D2（setup/metrics/写出不在失败记录范围内）由协调者（A0）修复并自查。`partitioned-check` CLI 入口先清理输出再读取、解析、校验配置，输入失败也保存 `failure.json`（保留 `config_path`，`config` 与 `histories_unchanged` 为 `null`）；`run_partitioned_check` 的失败记录覆盖 setup、metrics 与输出写出，无法评估历史时不伪造布尔值。A7 独立测试中 6 项 strict xfail（D1×4、D2×2）已转为正常断言并实际通过；相关回归 85 项、工作区全量回归 425 项通过（Python 3.12.3，项目 `.venv`）。证据见 [D1/D2 修复记录](docs/validation/t18_fixes.md) 与 `results/t19/fix_d1d2/`。该修复为修复者自查，不代替 A7 独立复核；T19 独立验收与 T20 保持待办。
 
 另一并行工作包（T13-FSI1 参考与 T20 准备）当前在 `results/t20/reference/` 留有原始参考页面存档与三套共享几何匹配网格原型（尺寸 0.01/0.005/0.0025，拓扑、坐标与合成映射恒等式检查通过，状态 `passed_prototype_only`），但计划交付的 `docs/development/fsi1_plan.md` 与 `cases/fsi1_reference.json` 在本轮检查时尚未落地；临时网格原型不等于正式 FSI1 或 T20 验收。
+
+## 11. M5 并行推进（2026-10-11，进行中）
+
+用户清理了上一轮未完成的 M5 设计草稿后，要求继续推进 M5。本轮使用 `orchestration` 技能，实际 Run `run_729d5b75022c`（协调者终端绑定一度失效，已用 `run-use` 重绑）；三个 opencode 执行者同一工作区、按文件独占；不提交、不上传。
+
+第一波（已交付）：
+
+| 任务 | 执行者 | Task / Dispatch | 交付文件 | 状态 |
+| --- | --- | --- | --- | --- |
+| T21 整体残差与完整耦合 Jacobian 实现 | A6 | `task_a408b186fe04` / `ctx_92a1bbfd7738` | `coupling/monolithic.py`、`validation/monolithic.py`、`tests/test_monolithic_residual.py`（21 项）、`docs/validation/t21.md` | 已交付；自测 21 passed/28.1 s、指定回归 152 passed、全量 497 passed；协调者本地复跑 21 passed/25.8 s |
+| T22 Newton 设计与求解器原型 | A6 | `task_7e821dfbdb2c` / `ctx_b80911dddffb` | `docs/development/m5_t22_plan.md`、`coupling/newton.py`、`tests/test_newton.py`（44 项） | 已交付；44 passed/0.38 s（协调者复跑） |
+| T23 一致性与成本比较设计 | A7 | `task_2cffcab708ea` / `ctx_5aa2788dd095` | `docs/development/m5_t23_plan.md`、`docs/validation/m5.md`、`cases/m5_validation.json`（20 条 not_executed） | 已交付；20/20 条目、JSON 与链接校验通过（协调者复核） |
+
+T22 owner 交叉复核 T21/T23 契约，发现 11 项（2 阻塞）；A0 裁决与冻结接口写入 [m5_freeze.md](docs/development/m5_freeze.md)（M-3 压力规范 `pressure_pin=None`、M-11 伪时间 BDF 推进至固定点、M-4 计时修复、M-2/M-5 适配约定等）。T21 实测：六块混合方向最佳相对误差 7.39e-11（门槛 1e-5）、逐块随机方向 1.9e-16…5.7e-11、`J@q` 与 JVP 相对差 1.6e-16、界面/约束恒等式 ≤1e-12·S；真实 FSI1 h=0.02 冒烟 n=12905 全部有限（残差 0.27 s / JVP 0.69 s / 组装 Jacobian 19.43 s）。
+
+第二波（两路并行，结果见下）：
+
+| 任务 | 执行者 | Task / Dispatch | 可写范围 |
+| --- | --- | --- | --- |
+| T21 独立验证与 M5 文档同步（21-01…21-05 状态、T23 文档修正） | A7 | `task_8af4af2bc4ad` / `ctx_31b891515011` | `tests/test_monolithic_review.py`、`docs/validation/t21_review.md`、`m5.md`、`cases/m5_validation.json`、`m5_t23_plan.md` |
+| T22 整体 Newton 集成与定常推进 | A6 | `task_71a083b329b3` / `ctx_1d587e671f45` | `coupling/monolithic_newton.py`、`newton.py`（兼容扩展）、`tests/test_monolithic_newton.py`、`tests/test_newton.py`（追加）、`docs/validation/t22.md` |
+
+T21 已交付文件在独立验证期间冻结；`time/transaction.py` 与公共文件本轮不改。后续由 A0 汇总：T23 一致性/成本执行、CLI 与配置集成、原理文档补入、全量回归与 M5 验收记录；M5 完成勾选等待全部本地证据。
+
+第二波结果（已交付）：
+
+| 任务 | 执行者 | Task / Dispatch | 结果 |
+| --- | --- | --- | --- |
+| T21 独立验证与 M5 文档同步 | A7 | `task_8af4af2bc4ad` / `ctx_31b891515011` | 独立复核 **passed**：复跑 21 passed/26.5 s + 新独立测试 9 项通过；独立 eps 扫描最佳相对误差 2.30e-11–5.56e-11、装配 J 与 JVP 差 ≤1.9e-16、恒等式 0–2.8e-17、拒绝条件按预期；`cases/m5_validation.json` 中 21-01…21-05 已更新为 `passed`；T23 文档按 M-1/M-3/M-6/M-7/M-8/M-9/M-11 修正。证据见 [t21_review.md](docs/validation/t21_review.md) |
+| T22 整体 Newton 集成与定常推进 | A6 | `task_71a083b329b3` / `ctx_1d587e671f45` | 已交付：`coupling/monolithic_newton.py`（适配层、`solve_monolithic_step`、`march_to_steady`、计数与计时）、`newton.py` 向后兼容扩展（矩阵自由 GMRES/预条件钩子）、测试 19+17 项；小问题单步 4 次 Newton 达 9.17e-10，两种 dt 推进 14/16 步到同一固定点（最大块差 2.06e-9），失败路径诊断完整；真实 FSI1 h=0.02 两步冒烟 149.8 s（7 次 Newton、缝隙 ≤9e-19）；全量回归 **542 passed, 1 skipped**。证据见 [t22.md](docs/validation/t22.md) |
+
+第三波（已交付）：T23 一致性与成本执行（A7，`task_2e40ab2d8af2` / `ctx_09d2751198df`）——新增 `validation/monolithic_case.py`、`scripts/m5_compare.py`、`tests/test_m5_consistency.py`；在 h=0.02 同一网格完成三方法运行（分区 fixed/Aitken × 3 档 × 3 重复；整体 3 档伪时间推进至稳态，`dt=1.0`、BDF2、assembled/splu），1e-10 档逐变量一致性全部通过（最大差 ≤8.3e-11；最不利裕度比 0.984），23-01…23-07、23-09、23-10 为 `passed`，23-08 按 h=0.02 字面门槛记 `failed`（网格分辨率限制：tip_y 31.68%/lift 0.1065 三方法一致且与只读 T20 基线逐位相同；最细档门槛沿用 T20 证据），未放宽任何门槛；新测试 15 项 + 门控 16 项通过；证据 [t23.md](docs/validation/t23.md)、结果 `results/m5/t23/`。
+
+A0 收尾（2026-10-12）：
+
+- M5 矩阵 [m5.md](docs/validation/m5.md) 与 [m5_validation.json](cases/m5_validation.json)：22-01/22-02/22-03/22-05 依 T22 证据更新为 `passed`（A0 本地复跑新增/相关测试 80 passed, 1 skipped），22-04 保持 `not_executed`（march 驱动层不变量已验证，`StepTransaction` 衔接未实现，留待 M6/瞬态集成）；21-*、23-* 状态由独立验证与 T23 执行更新。
+- T23 比较容差在 [m5_freeze.md](docs/development/m5_freeze.md) r1 正式冻结（`rtol=1e-8`、`atol=1e-10·S*`，与已执行运行一致，未调整）。
+- [gola.md](gola.md) M5 勾选完成并记录退出条件与记录项；[spec.md](spec.md) 状态行与 [README.md](README.md) 更新（含整体耦合与 T23 运行入口）；原理文档更新已完成（独立任务 `task_4ffff6d3656e`：`docs/principles/index.html` 新增整体耦合小节，HTML 结构与 118 条本地链接检查通过，未做浏览器视觉检查）。
+- A0 冻结状态全量回归：**557 passed, 2 skipped**（与 T23 记录一致；命令 `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests -q`）。
+- 本轮全部改动未提交、未推送；按 AGENTS.md 等待用户指示后再上传。
+
+M5 终端归属：T21、T22、T23 终端均为用户接管保留（`user_takeover`），W2/A7/W2b/W3 终端已释放。

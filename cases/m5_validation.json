@@ -1,0 +1,864 @@
+{
+  "case": "m5_validation",
+  "version": "m5-r2-t23-executed-2026-10-12",
+  "date": "2026-10-12",
+  "status": "in_progress",
+  "verification": {
+    "executed_by": "A7",
+    "date_time": "2026-10-11（Asia/Shanghai）",
+    "scope": "r1：T21 独立验证（实际复跑实现者测试 + 独立复核脚本）与按 m5_freeze.md 的文档同步；T22 由 A6 并行实现/集成，T23 依赖 T22，本轮不运行 T22/T23 求解。",
+    "code_state": {
+      "git_head": "9647efa0aa25aee72c621289021e872e87363d3d",
+      "worktree": "modified（T21 文件冻结未改；本轮只写 tests/test_monolithic_review.py、docs/validation/t21_review.md、docs/validation/m5.md、cases/m5_validation.json、docs/development/m5_t23_plan.md）"
+    },
+    "environment": {
+      "python": "3.12.3",
+      "interpreter": ".venv/bin/python",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "pytest": "9.1.1",
+      "platform": "Linux-7.0.0-38-generic-x86_64",
+      "thread_prefix": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1"
+    },
+    "checks": [
+      {
+        "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py -q",
+        "exit_code": 0,
+        "result": "21 passed in 26.47 s（实现者自测复跑）"
+      },
+      {
+        "command": ".venv/bin/python -m pytest tests/test_monolithic_review.py -q -s",
+        "exit_code": 0,
+        "result": "9 passed in 2.18 s（A7 独立复核：方向导数/零响应/恒等式/拒绝条件/证据抽样）"
+      },
+      {
+        "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+        "exit_code": 0,
+        "result": "30 passed in 29.32 s"
+      },
+      {
+        "command": "sha256sum src/fsi_ice/coupling/monolithic.py src/fsi_ice/validation/monolithic.py tests/test_monolithic_residual.py",
+        "result": "验证前后指纹一致：a708a859…（monolithic.py）、2dfcab04…（validation/monolithic.py）、28bd3c6c…（tests/test_monolithic_residual.py）；完整指纹见 docs/validation/t21_review.md §1"
+      },
+      {
+        "command": ".venv/bin/python -c \"import json; json.load(open('cases/m5_validation.json'))\"",
+        "exit_code": 0,
+        "result": "valid JSON；20 条 id 与 docs/validation/m5.md 表格编号一一对应"
+      }
+    ],
+    "item_status": {
+      "passed": 5,
+      "not_executed": 15,
+      "failed": 0
+    },
+    "evidence": "T21 独立验证记录 docs/validation/t21_review.md（命令、环境、方向导数表、恒等式/拒绝条件抽查、实现者数字抽样、sha256）；实现者报告 docs/validation/t21.md；数据 results/m5/t21/scan_evidence.json、results/m5/t21/fsi1_smoke.json（只读引用）。",
+    "notes": [
+      "21-01…21-05 依据 A7 独立复核证据更新为 passed；T22/T23 共 15 条保持 not_executed，未执行项不为通过。",
+      "未修改 src/ 与 T21 冻结文件（monolithic.py、validation/monolithic.py、tests/test_monolithic_residual.py、docs/validation/t21.md、results/m5/t21/ 的实现方产物）。",
+      "运行实现者冒烟测试会按其自身设计重写 results/m5/t21/fsi1_smoke.json；确定性字段与 scan 快照一致，仅计时字段随运行漂移（见 t21_review.md §5）。"
+    ]
+  },
+  "source_documents": [
+    "spec.md §5.2（数值验收：FSI1 两种耦合方法、Jacobian 方向导数 ≤1e-5）、§5.3（算法比较：固定离散、物理误差、残差归一化、成本项与计时记录）、§3.3（共享离散与失败处理）",
+    "gola.md M5（整体耦合与一致性阶段目标与退出条件）",
+    "agent.md §3 M5 任务表（T21/T22/T23 负责人与验收证据）",
+    "docs/development/m5_freeze.md（A0 冻结接口与 M-1…M-11 裁决；A7 文档同步依据）",
+    "docs/development/m5_t23_plan.md（A7 方法学：比较方法、逐变量判据、成本统计、T20 字段盘点）",
+    "docs/validation/t21.md（实现者报告）与 docs/validation/t21_review.md（A7 独立验证记录）",
+    "docs/validation/t20.md 与 cases/fsi1.json（分区 Aitken 基线与冻结 FSI1 门槛）",
+    "docs/development/m3_freeze.md §6（既有冻结门槛：方向导数 1e-5、重试-基线 1e-10、代数恒等 1e-12·S）",
+    "docs/development/interface_plan.md §9（界面映射、载荷与下游导数门槛）",
+    "docs/development/validation_plan.md（验证与证据记录方法学）",
+    "docs/environment.md（Python 与依赖版本）",
+    "cases/m3_validation.json（机器可读结构参照）"
+  ],
+  "notes": [
+    "r1（2026-10-11，A7）：T21 5 条（21-01…21-05）已由独立验证更新为 passed；T22 5 条、T23 10 条保持 not_executed；与 docs/validation/m5.md 编号一一对应。",
+    "阈值分三类：（a）spec 固定值，直接引用 spec.md §5.2（Jacobian 方向导数 ≤1e-5；FSI1 tip_y/drag ≤5%、tip_x 绝对 ≤1e-5 m、lift 绝对 ≤0.1 N/m）；（b）既有 A0 冻结裁决，沿用 m3_freeze.md §6.1（重试-基线 ≤1e-10；代数恒等 ≤1e-12·S），不新增更宽的值；（c）拟议值（T23 逐变量 rtol=1e-8、atol=1e-10·S*；容差收紧序列 {1e-6,1e-8,1e-10}；方法误差差按相对/绝对分别操作化 ≤0.005），依据 spec.md §5.2“逐变量尺度和明确的绝对/相对容差”与 §5.3 要求，执行前由 A0 冻结，任何调整须记录理由且不得放宽 spec 固定门槛。thresholds 字段与冻结时一致。",
+    "协调裁决同步（m5_freeze.md）：压力规范 M-3——FSI1 一致性比较两侧均 pressure_pin=None（出口自然边界定压），PressurePin 可选，如用 pin 两侧须同一定义并记录；定常取得 M-11——整体法定常解由伪时间 BDF 推进至固定点（Σa_j=0），T22 实现推进与停机判据，成本记录步数/Newton 次数/时间项收敛值；残差定义 M-1——不同定义的残差数字不直接比较；测试文件 M-9——T21 实际交付 tests/test_monolithic_residual.py、独立复核 tests/test_monolithic_review.py，T22 拟名 tests/test_monolithic_newton.py，T23 拟名 tests/test_m5_consistency.py。",
+    "一致性判据：max|a_M - a_P| <= rtol*max(||a_M||inf, ||a_P||inf) + atol；接近零的量由 atol 兜底，禁止用不可靠的相对误差。",
+    "状态与证据只在 A0/A7 本地实际运行并复核后更新；本文件本身不构成验收；passed 条目附测试名、命令、实测数值与报告路径。",
+    "r1 未运行整体/分区求解；未修改实现方文件与他人的报告/结果。",
+    "r2（2026-10-12，A7）：T23 已实际执行；23-01…23-07、23-09、23-10 为 passed，23-08 为 failed（网格分辨率，见 docs/validation/t23.md §7）；21-xx/22-xx 条目未改动。",
+    "r3（2026-10-12，A0）：T22 证据同步——22-01/22-02/22-03/22-05 更新为 passed（依据 t22.md 与 A0 本地复跑 80 passed）；22-04 保持 not_executed（驱动层已验证，StepTransaction 衔接未实现，t22.md §11.5）。T21/T23 状态不变。"
+  ],
+  "scales": {
+    "generic": {
+      "S_definition": "max(显式正物理尺度, 相关绝对贡献和)；数组误差默认 max(abs(a-b))/S",
+      "eps": {
+        "definition": "np.finfo(float).eps",
+        "approx": 2.220446049250313e-16
+      },
+      "L_star": {
+        "value": 1.0,
+        "unit": "m"
+      },
+      "T_star": {
+        "value": 1.0,
+        "unit": "s"
+      },
+      "U_star": {
+        "value": 1.0,
+        "unit": "m/s"
+      },
+      "P_star": {
+        "value": 1.0,
+        "unit": "Pa",
+        "definition": "max(rho*U^2, mu*U/L)"
+      },
+      "W_star": {
+        "value": 1.0,
+        "unit": "N*m"
+      },
+      "F_star": {
+        "value": 1.0,
+        "unit": "N"
+      }
+    },
+    "fsi1_case_proposed": {
+      "L_star": {
+        "value": 0.41,
+        "unit": "m",
+        "definition": "通道高 H；执行前冻结，同一比较全表一致"
+      },
+      "U_star": {
+        "value": 0.2,
+        "unit": "m/s",
+        "definition": "平均入口速度 Ubar"
+      },
+      "P_star": {
+        "value": 40.0,
+        "unit": "Pa",
+        "definition": "max(rho*U^2, mu*U/L)=rho*U^2=40"
+      },
+      "F_star": {
+        "value": 14.29426,
+        "unit": "N/m",
+        "definition": "官方参考阻力（线载荷尺度）"
+      }
+    },
+    "consistency_criterion": {
+      "formula": "max|a_M - a_P| <= rtol*max(||a_M||inf, ||a_P||inf) + atol",
+      "rtol_proposed": 1e-08,
+      "atol_proposed": "1e-10*S*（按变量）",
+      "freeze_status": "执行前由 A0 冻结",
+      "rationale": "三种方法求解同一离散方程，终止容差收紧到 tau=1e-10 后差异主要来自终止准则与舍入；比较容差取 rtol=1e-8（比 tau 宽两个数量级）并以 1e-10*S* 为接近零量的下限；不是 spec 固定值，不得放宽 spec 固定门槛。"
+    }
+  },
+  "t21": {
+    "owner": "A6 实现；A7 独立复核（2026-10-11，passed）",
+    "items": [
+      {
+        "id": "21-01",
+        "title": "整体残差复用单场物理核（同状态逐项一致）",
+        "plan_ref": [
+          "spec.md §3.3",
+          "spec.md §5.3(1)",
+          "m5_t23_plan.md §2.2"
+        ],
+        "thresholds": {
+          "same_state_residual_normalized_max_diff": 1e-12,
+          "scale": "S（m3 约定：max(显式正物理尺度, 相关绝对贡献和)）",
+          "shared_physics_kernels_mandatory": true,
+          "degenerate_zero_coupling_and_fixed_grid_checked": true,
+          "duplicate_physics_implementation_forbidden": true
+        },
+        "evidence": {
+          "test_file": "tests/test_monolithic_residual.py（实现者）；tests/test_monolithic_review.py（A7 独立）",
+          "test_names": [
+            "test_21_01_shared_residual_kernels_and_degenerate_paths",
+            "test_review_identity_h_and_htranspose",
+            "test_review_identity_bdf_compatibility_row",
+            "test_review_identity_thickness_counted_once",
+            "test_review_identity_pressure_pin_row"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+          "result": "30 passed（21+9），29.32 s；独立恒等式 H 6.9e-18、H^T 2.8e-17、BDF 相容行 0.0、厚度线性缩放 0.0、pin 行 0.0、pin=None 原始行 0.0（均 ≤1e-12·S）",
+          "report": "docs/validation/t21.md §4.7/§5；docs/validation/t21_review.md §3.3",
+          "data": "results/m5/t21/scan_evidence.json"
+        },
+        "notes": [
+          "1e-12 沿用 m3_freeze.md §6 代数恒等惯例；同状态下纯装配恒等应接近机器精度。",
+          "spec §3.3 要求整体法直接访问残差接口，不能仅调用单场 solve 函数。",
+          "A7 独立证据：恒等式与退化路径抽查见 t21_review.md §3.3；实现者自测含零耦合/固定网格退化路径。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "21-02",
+        "title": "逐块方向导数（流体 u/p、网格 a/w、固体 d、界面块）",
+        "plan_ref": [
+          "spec.md §5.2 Jacobian",
+          "m3_freeze.md §6 导数扫描",
+          "m5_t23_plan.md §2.4"
+        ],
+        "thresholds": {
+          "center_difference_min_relative_directional_error": 1e-05,
+          "perturbation_scan": [
+            0.01,
+            1e-07
+          ],
+          "show_truncation_and_rounding_trend": true,
+          "zero_response_directions_use_absolute_scale": true,
+          "required_blocks": [
+            "fluid u/p",
+            "ALE mesh a/w geometry",
+            "solid d",
+            "interface load"
+          ],
+          "prerequisites": [
+            "m3 15-05 passed",
+            "m3 16-DER passed"
+          ]
+        },
+        "evidence": {
+          "test_file": "tests/test_monolithic_residual.py（实现者）；tests/test_monolithic_review.py（A7 独立）",
+          "test_names": [
+            "test_21_02_block_directional_derivatives_single_components",
+            "test_21_02_block_directional_derivatives_zero_blocks_and_unit_rows",
+            "test_21_02_block_directional_derivatives_random_directions",
+            "test_21_02_block_directional_derivatives_zero_response_absolute",
+            "test_review_directional_derivatives_full_scan",
+            "test_review_zero_response_direction_absolute"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+          "result": "独立扫描（seed 20261019/20261021，h=1e-2…1e-7）最佳相对误差 2.41e-11 / 5.56e-11 / 2.30e-11 ≤1e-5；零响应方向 g 行绝对误差 0.0（≤1e-9）；趋势 decreasing_then_increasing（混合随机方向在 1e-7 仍未回升，not_resolved）",
+          "report": "docs/validation/t21_review.md §3.1/§3.2；docs/validation/t21.md §4.1/§4.2/§4.6",
+          "data": "results/m5/t21/scan_evidence.json"
+        },
+        "notes": [
+          "门槛 1e-5 直接来自 spec.md §5.2 Jacobian 行；扰动扫描与趋势要求来自同行的扫描表述。",
+          "A7 独立扫描自写中心差分与方向，不复用 src/fsi_ice/validation/monolithic.py 辅助。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "21-03",
+        "title": "全局（跨块）方向导数与几何依赖链",
+        "plan_ref": [
+          "spec.md §5.2 Jacobian",
+          "spec.md §3.3",
+          "m5_t23_plan.md §2.4"
+        ],
+        "thresholds": {
+          "center_difference_min_relative_directional_error": 1e-05,
+          "perturbation_scan": [
+            0.01,
+            1e-07
+          ],
+          "show_error_trend": true,
+          "include_interface_and_mesh_geometry_dependence": true,
+          "zero_response_directions_use_absolute_scale": true
+        },
+        "evidence": {
+          "test_file": "tests/test_monolithic_residual.py（实现者）；tests/test_monolithic_review.py（A7 独立）",
+          "test_names": [
+            "test_21_03_global_directional_derivative_mixed_direction",
+            "test_21_03_global_directional_derivative_mesh_dependence_paths",
+            "test_21_03_global_directional_derivative_bdf1_and_bdf2",
+            "test_21_03_global_directional_derivative_jacobian_matches_jvp_on_batch",
+            "test_review_directional_derivatives_full_scan"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+          "result": "独立光滑/随机混合/界面链方向最佳 2.41e-11、5.56e-11、2.30e-11 ≤1e-5；装配 J@q 与矩阵自由 JVP 相对差 1.46e-16–1.93e-16 ≤1e-12；实现者三条网格依赖路径 3.93e-11–9.73e-11",
+          "report": "docs/validation/t21_review.md §3.1；docs/validation/t21.md §4.3/§4.4/§4.5",
+          "data": "results/m5/t21/scan_evidence.json"
+        },
+        "notes": [
+          "几何依赖链覆盖界面运动→网格几何→流体→载荷→固体的完整路径。",
+          "A7 独立方向含界面链（仅 d_s/v_s 湿迹 + g），覆盖同一链条。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "21-04",
+        "title": "耦合 Jacobian 完整性与近似审计",
+        "plan_ref": [
+          "spec.md §3.3",
+          "spec.md §5.2 Jacobian",
+          "m3_freeze.md §6 导数扫描"
+        ],
+        "thresholds": {
+          "unmarked_approximations_forbidden": true,
+          "approximation_center_difference_max_relative_error": 1e-05,
+          "approximation_perturbation_scan": [
+            0.01,
+            1e-07
+          ],
+          "report_per_block_derivative_source": true
+        },
+        "evidence": {
+          "test_file": "tests/test_monolithic_residual.py（实现者）；tests/test_monolithic_review.py（A7 独立）",
+          "test_names": [
+            "test_21_04_jacobian_completeness_and_approximation_audit_sources",
+            "test_21_04_jacobian_completeness_and_approximation_audit_drop_one_block",
+            "test_21_04_jacobian_completeness_and_approximation_audit_callable_body_force",
+            "test_review_directional_derivatives_full_scan"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+          "result": "独立装配 Jacobian 中心差分扫描（3 方向）最佳 ≤5.6e-11 且与 JVP 逐点一致（≤1.93e-16）；实现者删块审计 8 个耦合矩形块，删块后相对误差 2.5e-4–2.4e-2（≫1e-5）；唯一近似（可调用流体体力中心差分）显式标注并对照通过",
+          "report": "docs/validation/t21_review.md §3.1；docs/validation/t21.md §5",
+          "data": "results/m5/t21/scan_evidence.json（completeness 段）"
+        },
+        "notes": [
+          "spec §3.3：整体 Jacobian 包含实际残差对其他场的依赖；遗漏耦合导数的近似需明确标注。",
+          "A7 独立以装配 J 与中心差分直接对照，不以实现者的删块审计替代。"
+        ],
+        "status": "passed"
+      },
+      {
+        "id": "21-05",
+        "title": "界面约束块恒等式（H、D_BDF、Hᵀ、厚度、压力规范）",
+        "plan_ref": [
+          "spec.md §3.3",
+          "spec.md §5.2 Jacobian",
+          "interface_plan.md §9",
+          "m3_freeze.md §6"
+        ],
+        "thresholds": {
+          "algebraic_identity_max_scaled_error": 1e-12,
+          "algebraic_identity_scale": "S（m3 约定）",
+          "interface_load_directional_derivative_max_relative_error": 1e-05,
+          "thickness_counted_once": true,
+          "assembled_nodal_force_not_reintegrated": true,
+          "pressure_gauge_convention_recorded": true,
+          "precedent": "m3 16-03/16-04/16-05 冻结门槛"
+        },
+        "evidence": {
+          "test_file": "tests/test_monolithic_residual.py（实现者）；tests/test_monolithic_review.py（A7 独立）",
+          "test_names": [
+            "test_21_05_interface_constraint_identities_h_bdf_ht_thickness_pin",
+            "test_21_05_interface_constraint_identities_load_block_derivatives",
+            "test_review_identity_h_and_htranspose",
+            "test_review_identity_bdf_compatibility_row",
+            "test_review_identity_thickness_counted_once",
+            "test_review_identity_pressure_pin_row",
+            "test_review_rejection_flip_and_quality",
+            "test_review_rejection_stale_and_mixed_versions"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_residual.py tests/test_monolithic_review.py -q",
+          "result": "独立抽查：H 6.9e-18、H^T 2.8e-17、BDF 相容行 0.0、厚度 0.25/1/4 线性缩放 0.0、pin 行与导数 0.0、pin=None 原始行 0.0（均 ≤1e-12·S）；拒绝条件（真翻转 det(J_x)=-0.167、质量 4e-4<0.2、stale stencil/几何、混合拓扑/载荷）全部按预期抛出",
+          "report": "docs/validation/t21_review.md §3.3/§3.4；docs/validation/t21.md §4.7/§7",
+          "data": "results/m5/t21/scan_evidence.json"
+        },
+        "notes": [
+          "沿用 M3 已冻结的界面代数/导数门槛，不新增更宽的值。",
+          "A7 独立构造了真翻转与质量拒绝；实现者镜像用例实际触发 GCL 扫掠路径退化（见 t21_review.md §5 观察 3）。"
+        ],
+        "status": "passed"
+      }
+    ]
+  },
+  "t22": {
+    "owner": "A6；A7 复核证据；A0 收尾同步（2026-10-12）",
+    "items": [
+      {
+        "id": "22-01",
+        "title": "整体 Newton 收敛与残差归一化",
+        "plan_ref": [
+          "spec.md §5.2",
+          "spec.md §5.3(3)",
+          "m5_t23_plan.md §2.3"
+        ],
+        "thresholds": {
+          "tolerance_ladder_proposed": [
+            1e-06,
+            1e-08,
+            1e-10
+          ],
+          "tolerance_ladder_freeze_status": "执行前由 A0 冻结",
+          "each_level_reaches_declared_tolerance": true,
+          "residual_normalized_and_definition_recorded": true,
+          "iteration_history_stored": true,
+          "no_nan_or_inf": true,
+          "no_silent_continue": true
+        },
+        "notes": [
+          "spec §5.3(3)：残差按变量尺度归一化、记录定义，不直接比较不同定义的残差数字。",
+          "A0 复核（2026-10-12）：本地复跑 tests/test_monolithic_newton.py + tests/test_newton.py = 80 passed, 1 skipped / 35.9 s。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "test_file": "tests/test_monolithic_newton.py（已交付）",
+          "test_names": [
+            "test_step_converges_to_declared_tolerance_and_records",
+            "test_step_quadratic_convergence_trend",
+            "test_march_reaches_steady_state"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_newton.py -q",
+          "result": "19 passed, 1 skipped（门控 FSI1 冒烟）；小问题单步 4 次 Newton 达 ‖R‖_S=9.17e-10 且满足二次趋势；真实 FSI1 h=0.02 三档 1e-6/1e-8/1e-10 均 steady（末时间项 8.99e-7/7.75e-9/5.87e-11，见 t23.md §5）",
+          "report": "docs/validation/t22.md §4/§5/§9；docs/validation/t23.md §5",
+          "data": "results/m5/t22/evidence.json；results/m5/t23/comparison/summary.json"
+        }
+      },
+      {
+        "id": "22-02",
+        "title": "失败检测：不收敛/奇异/NaN/Inf/负 det/线搜索失败",
+        "plan_ref": [
+          "spec.md §3.3",
+          "spec.md §5.1",
+          "m5_t23_plan.md §2.4"
+        ],
+        "thresholds": {
+          "failure_cases": [
+            "不收敛",
+            "矩阵奇异",
+            "NaN/Inf",
+            "负 det（网格翻转或固体退化）",
+            "线搜索失败"
+          ],
+          "diagnostics_must_locate": [
+            "case",
+            "iteration_or_step",
+            "stage",
+            "reason"
+          ],
+          "silent_continue_forbidden": true
+        },
+        "notes": [
+          "每类失败必须显式抛出并保存诊断，不得静默继续（spec §3.3 末段）。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "test_file": "tests/test_monolithic_newton.py（已交付）；tests/test_monolithic_residual.py（T21 非法候选拒绝）",
+          "test_names": [
+            "test_line_search_failure_diagnostics_and_no_pollution",
+            "test_singular_jacobian_injection_fails_in_linear_solve",
+            "test_non_finite_input_and_residual_fail_structurally",
+            "test_iteration_cap_failure",
+            "test_march_failure_reports_completed_steps"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_newton.py -q",
+          "result": "6 类注入失败（线搜索/奇异 Jacobian/非有限 x0/非有限残差/迭代上限/推进步包装）均结构化抛出，含 phase/iteration/归一化与原始范数/普通映射诊断；非法候选（翻转/GCL 退化/stale/混合版本）由 T21 拒绝测试覆盖",
+          "report": "docs/validation/t22.md §6；docs/validation/t21.md §7",
+          "data": "results/m5/t22/evidence.json"
+        }
+      },
+      {
+        "id": "22-03",
+        "title": "失败恢复：数组/历史/缓存回滚，重试与基线一致",
+        "plan_ref": [
+          "spec.md §3.3",
+          "m3_freeze.md §6.1 D2",
+          "m5_t23_plan.md §2.4"
+        ],
+        "thresholds": {
+          "retry_vs_baseline_max_scaled_diff": 1e-10,
+          "arrays_and_history_exact": "np.array_equal",
+          "failed_state_never_used_as_initial": true,
+          "precedent": "m3_freeze.md §6.1 D2 裁决（完整重试-基线比较维持 1e-10）"
+        },
+        "notes": [
+          "失败的时间步/候选必须恢复所有场、网格和积分历史（spec §3.3）。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "test_file": "tests/test_monolithic_newton.py（已交付）",
+          "test_names": [
+            "test_line_search_failure_diagnostics_and_no_pollution",
+            "test_march_failure_reports_completed_steps"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_newton.py -q",
+          "result": "注入失败后 x0、两段已接受历史、参考网格坐标、界面 H 全部逐位不变；撤销注入后重新求解与失败前基线逐位一致；失败步部分计数保留且不污染后续",
+          "report": "docs/validation/t22.md §6",
+          "data": "results/m5/t22/evidence.json"
+        }
+      },
+      {
+        "id": "22-04",
+        "title": "时间历史生命周期：迭代期间不提交，每步一次接受",
+        "plan_ref": [
+          "spec.md §3.3",
+          "m3_freeze.md §6 T17 回滚"
+        ],
+        "thresholds": {
+          "history_frozen_during_candidates": true,
+          "accepted_history_advances_once_per_step": true,
+          "accepted_steps_time_dt_order_exact": true,
+          "consistent_with_m3_t17_transaction": true
+        },
+        "notes": [
+          "复用 M3/T17 事务机制；同一时间步重复求解从一致的已接受历史开始。",
+          "A0 裁决（2026-10-12）：行为层证据充分但事务衔接缺失，状态保持 not_executed；留待瞬态/事务集成任务（M6）复核后更新。"
+        ],
+        "status": "not_executed",
+        "evidence": {
+          "test_file": "tests/test_monolithic_newton.py（已交付，驱动层部分）",
+          "test_names": [
+            "test_march_is_deterministic_and_read_only",
+            "test_results_are_read_only_and_inputs_isolated"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_newton.py -q",
+          "result": "march 驱动层已实测：Newton 迭代期间接受历史冻结、每步恰一次接受、确定性与只读；但门槛要求的 StepTransaction 衔接未实现（见 t22.md §11.5），按规则不标记通过",
+          "report": "docs/validation/t22.md §2.3/§6/§11.5",
+          "data": "results/m5/t22/evidence.json"
+        }
+      },
+      {
+        "id": "22-05",
+        "title": "工作量导出：Newton/线性求解/失败计数",
+        "plan_ref": [
+          "spec.md §5.3(4)",
+          "m5_t23_plan.md §4.1"
+        ],
+        "thresholds": {
+          "required_counters": [
+            "newton_iterations",
+            "linear_solves",
+            "linear_iterations",
+            "failed_steps"
+          ],
+          "counter_definitions_recorded": true,
+          "counters_exported_to_report": true
+        },
+        "notes": [
+          "解决 m5_t23_plan §5.2 中线性求解/固体 Newton 计数缺口。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "test_file": "tests/test_monolithic_newton.py（已交付）；consumption by src/fsi_ice/validation/monolithic_case.py + scripts/m5_compare.py",
+          "test_names": [
+            "test_step_counters_are_deterministic",
+            "test_march_level_aggregates_chunks_and_handles_failure"
+          ],
+          "command": ".venv/bin/python -m pytest tests/test_monolithic_newton.py -q",
+          "result": "计数恒等式（evaluations=residual+assembled+jvp 等）与重复运行确定性通过；T23 成本表直接消费导出字段（newton_iterations/linear_solves/linear_iterations/failed_steps 等，含定义）",
+          "report": "docs/validation/t22.md §2.4/§7/§9；docs/validation/t23.md §8",
+          "data": "results/m5/t22/evidence.json；results/m5/t23/comparison/cost_per_item.csv"
+        }
+      }
+    ]
+  },
+  "t23": {
+    "owner": "A7，A5/A6 协作；A0 冻结门槛",
+    "items": [
+      {
+        "id": "23-01",
+        "title": "同一离散配置清单与指纹",
+        "plan_ref": [
+          "spec.md §5.3(1)",
+          "spec.md §3.3",
+          "m5_t23_plan.md §2.2"
+        ],
+        "thresholds": {
+          "identical_mesh_material_bc_pressure_startup_output": true,
+          "config_and_mesh_hash_fingerprint_recorded": true,
+          "discretization_difference_between_methods": 0
+        },
+        "notes": [
+          "三种方法必须共享同一 MSH2 拆分网格、材料、边界、压力规范、启动方式与输出设置。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "command": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py prepare（完整命令见 docs/validation/t23.md §3）",
+          "result": "三方法共用同一 SteadyFSI1Problem 网格/拓扑对象与同一配置快照；mesh sha256 e0f96b40…（与 T20 fsi1.msh 逐字节一致）；fluid cells 2091、solid cells 148、流体 DOF 9877、固体 DOF 226、界面 74 边；两侧 pressure_pin=None；整体显式零态+入口 Dirichlet 启动",
+          "report": "docs/validation/t23.md §2/§6.1",
+          "data": "results/m5/t23/manifest.json、results/m5/t23/comparison/summary.json",
+          "test": ".venv/bin/python -m pytest tests/test_m5_consistency.py -q → 15 passed, 1 skipped（2026-10-12）"
+        }
+      },
+      {
+        "id": "23-02",
+        "title": "收紧容差序列与单方法自稳定（进入平台后比较）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "m5_t23_plan.md §2.3"
+        ],
+        "thresholds": {
+          "tolerance_ladder_proposed": [
+            1e-06,
+            1e-08,
+            1e-10
+          ],
+          "freeze_status": "执行前由 A0 冻结",
+          "adjacent_level_per_variable_diff_within_comparison_tolerance": true,
+          "require_plateau": true,
+          "no_plateau_means_failure_report": true,
+          "residual_definition_recorded": true
+        },
+        "notes": [
+          "不得选取“看起来通过”的档位；无平台时记录失败/待查。整体法定常解由伪时间 BDF 推进至固定点取得（固定点处 BDF 时间项精确抵消 Σa_j=0，M-11）；收紧档位分别施加于各方法自身记录的归一化残差定义（M-1，不直接并列不同定义的残差数字）。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "command": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python scripts/m5_compare.py compare --levels 1e-6,1e-8,1e-10",
+          "result": "最紧相邻档 1e-8→1e-10 三方法全变量通过比较容差（最不利比值：monolithic u_f 0.572、partitioned-fixed d_m 0.984、partitioned-aitken d_m 0.164）；1e-6→1e-8 差未进入比较容差属预期（比较解取最紧档；平台判据未放宽）",
+          "report": "docs/validation/t23.md §6.2",
+          "data": "results/m5/t23/comparison/platform_per_variable.csv、results/m5/t23/comparison/summary.json"
+        }
+      },
+      {
+        "id": "23-03",
+        "title": "位移一致性（全场 P1 节点值与 tip A）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "m5_t23_plan.md §3.2"
+        ],
+        "thresholds": {
+          "criterion": "max|Delta a| <= rtol*max(||a_M||inf, ||a_P||inf) + atol",
+          "rtol_proposed": 1e-08,
+          "atol_proposed": "1e-10*L*",
+          "L_star_proposed_m": 0.41,
+          "compare_full_field_and_tip_A": true,
+          "freeze_status": "执行前由 A0 冻结"
+        },
+        "notes": [
+          "小量按 spec §5.2 用绝对容差兜底；报告 max|Delta| 与该变量的相对量。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "1e-10 档（整体 vs Aitken）：d_s max|Δ|=4.32e-15 m ≤ 4.66e-11；tip_A max|Δ|=1.36e-15 m ≤ 4.66e-11；fixed 侧同判据通过",
+          "report": "docs/validation/t23.md §6.1",
+          "data": "results/m5/t23/comparison/consistency_per_variable.csv"
+        }
+      },
+      {
+        "id": "23-04",
+        "title": "速度一致性（同一 P2 空间节点值）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "m5_t23_plan.md §3.2"
+        ],
+        "thresholds": {
+          "criterion": "max|Delta a| <= rtol*max(||a_M||inf, ||a_P||inf) + atol",
+          "rtol_proposed": 1e-08,
+          "atol_proposed": "1e-10*U*",
+          "U_star_proposed_m_per_s": 0.2,
+          "same_p2_space_nodes": true,
+          "freeze_status": "执行前由 A0 冻结"
+        },
+        "notes": [
+          "比较前确认三种方法使用同一 P2 速度空间的节点编号与插值。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "1e-10 档：u_f max|Δ|=1.58e-11 m/s ≤ 4.01e-09（比值 0.004）",
+          "report": "docs/validation/t23.md §6.1",
+          "data": "results/m5/t23/comparison/consistency_per_variable.csv"
+        }
+      },
+      {
+        "id": "23-05",
+        "title": "压力一致性（移除零模后比较）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "spec.md §5.3(3)",
+          "m5_t23_plan.md §3.2"
+        ],
+        "thresholds": {
+          "criterion": "max|Delta a| <= rtol*max(||a_M||inf, ||a_P||inf) + atol",
+          "rtol_proposed": 1e-08,
+          "atol_proposed": "1e-10*P*",
+          "P_star_proposed_pa": 40.0,
+          "gauge_removed_before_comparison": true,
+          "same_pressure_convention_required": true,
+          "freeze_status": "执行前由 A0 冻结"
+        },
+        "notes": [
+          "压力零模在比较前用同一约定移除；不得直接比较绝对压力常数；FSI1 两侧均 `pressure_pin=None`（出口自然边界定压，M-3），若改用 pin 需两侧同一定义并记录。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "1e-10 档（两侧 pressure_pin=None）：p_f max|Δ|=3.00e-10 Pa ≤ 1.48e-06；零模诊断均值差 8.6e-11 Pa、去均值最大差 2.17e-10 Pa（未触发零模）",
+          "report": "docs/validation/t23.md §6.1",
+          "data": "results/m5/t23/comparison/consistency_per_variable.csv、summary.json"
+        }
+      },
+      {
+        "id": "23-06",
+        "title": "网格位移一致性（ALE 当前几何）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "m5_t23_plan.md §3.2"
+        ],
+        "thresholds": {
+          "criterion": "max|Delta a| <= rtol*max(||a_M||inf, ||a_P||inf) + atol",
+          "rtol_proposed": 1e-08,
+          "atol_proposed": "1e-10*L*",
+          "L_star_proposed_m": 0.41,
+          "mesh_health_required": "无翻转，最小体积比/质量达标（沿用 m3 几何门槛）",
+          "freeze_status": "执行前由 A0 冻结"
+        },
+        "notes": [
+          "网格位移=流体当前几何减参考坐标；同时检查几何健康。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "1e-10 档：d_m max|Δ|=3.33e-13 m ≤ 4.66e-11；几何健康：最小体积比 0.9885>0、最小质量 0.7279≥0.1、最小固体 Jacobian 0.9999>0",
+          "report": "docs/validation/t23.md §6.1",
+          "data": "results/m5/t23/comparison/consistency_per_variable.csv、results/m5/t23/monolithic/h_0.02/level_1e-10/summary.json"
+        }
+      },
+      {
+        "id": "23-07",
+        "title": "界面值与载荷一致性（H 映射值、Hᵀ 对偶载荷、功/力符号）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 两种耦合方法",
+          "spec.md §3.3",
+          "interface_plan.md §9"
+        ],
+        "thresholds": {
+          "interface_value_criterion": "max|Delta x| <= 1e-8*max(||x_M||inf, ||x_P||inf) + 1e-10*L*",
+          "interface_load_criterion": "max|Delta lambda| <= 1e-8*max(||lambda_M||inf, ||lambda_P||inf) + 1e-10*F*",
+          "L_star_proposed_m": 0.41,
+          "F_star_proposed_n_per_m": 14.29426,
+          "virtual_work_and_force_sign_checked": true,
+          "freeze_status": "执行前由 A0 冻结"
+        },
+        "notes": [
+          "载荷为 Hᵀ 对偶节点力；已组装节点力不重复积分（厚度只计一次）。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "1e-10 档：interface_x/interface_H max|Δ|=3.33e-13 m ≤ 4.66e-11；g 1.56e-12 ≤ 4.15e-09 N/m；lambda（Hᵀg）2.34e-12 ≤ 5.51e-09 N/m；功/力：Σg 与 Hᵀg 合力差 ≤2.8e-15 N/m，三方法 drag/lift 差 ≤8.3e-11",
+          "report": "docs/validation/t23.md §6.1/§6.3",
+          "data": "results/m5/t23/comparison/consistency_per_variable.csv、summary.json"
+        }
+      },
+      {
+        "id": "23-08",
+        "title": "物理误差对照（两方法均达标，不掩盖耦合误差）",
+        "plan_ref": [
+          "spec.md §5.2 FSI1 行",
+          "spec.md §5.3(2)",
+          "cases/fsi1.json"
+        ],
+        "thresholds": {
+          "tip_y_relative_error_max": 0.05,
+          "drag_relative_error_max": 0.05,
+          "tip_x_absolute_error_max": 1e-05,
+          "lift_absolute_error_max": 0.1,
+          "method_error_gap_relative_max_proposed": 0.005,
+          "method_error_gap_absolute_max_proposed": {
+            "tip_x_m": 0.005,
+            "lift_n_per_m": 0.005
+          },
+          "all_methods_must_pass_same_gates": true,
+          "gap_exceedance_requires_analysis_report": true,
+          "freeze_status": "spec 行固定；0.005 按相对/绝对分别操作化为拟议（M-7），执行前由 A0 冻结"
+        },
+        "notes": [
+          "按任务卡要求不得放宽 spec 固定门槛，因此在 T23 比较网格 h=0.02 上按字面门槛记为 failed；A0 可依据 T20 最细档只读证据与 cases/fsi1.json 的最细档验收语义另行裁决。"
+        ],
+        "status": "failed",
+        "evidence": {
+          "result": "h=0.02、1e-10 档：误差差全部通过（相对 ≤2.1e-12、绝对 ≤8.3e-11）；字面门槛 drag 1.43%≤5%、tip_x 4.38e-07≤1e-5 m 通过；tip_y 31.68%>5%、lift 0.1065>0.1 N/m 不通过（三种方法数值逐位一致，与只读 T20 h=0.02 基线一致）",
+          "t20_read_only_reference": "results/t20/fsi1/levels.csv：h=0.0075 满足全部四项（tip_y 4.08%、drag 0.39%、tip_x 2.95e-07 m、lift 0.0136 N/m）；h=0.02 行与本次逐位一致",
+          "analysis": "绝对门槛在本比较网格为网格分辨率限制而非耦合误差：三方法与 T20 基线一致、误差差 ≤2.1e-12；baseline 阶段以冻结 cases/fsi1.json 三档逐位复现 T20。未放宽门槛。",
+          "report": "docs/validation/t23.md §7",
+          "data": "results/m5/t23/comparison/summary.json、results/m5/t23/baseline_fsi1/compare_t20.json"
+        }
+      },
+      {
+        "id": "23-09",
+        "title": "成本统计完整性（总耗时/组装/线性/次数/失败步/物理误差）",
+        "plan_ref": [
+          "spec.md §5.3(4)",
+          "spec.md §5.3(5)",
+          "m5_t23_plan.md §4"
+        ],
+        "thresholds": {
+          "required_cost_items": [
+            "total_seconds",
+            "assembly_seconds",
+            "linear_solve_seconds",
+            "newton_iterations",
+            "coupling_iterations",
+            "linear_solves",
+            "linear_iterations",
+            "failed_steps",
+            "physical_errors",
+            "pseudo_time_steps",
+            "time_term_norm"
+          ],
+          "repeat_count_min": 3,
+          "report_median_and_min_max": true,
+          "warmup_excluded": true,
+          "plotting_excluded": true,
+          "mesh_generation_accounted_separately": true,
+          "thread_settings_recorded": true,
+          "hardware_and_versions_recorded": true,
+          "timer": "time.perf_counter"
+        },
+        "notes": [
+          "现有 T20 数据缺口（组装/线性计时、固体 Newton、LU/GMRES 计数、线程/硬件、重复聚合）见 m5_t23_plan.md §5.2。",
+          "计时口径与公平性要求见 m5_t23_plan.md §4.2/§4.3。",
+          "整体法定常推进（M-11）：记录伪时间步数 `pseudo_time_steps`、每步 Newton 次数与停机时尺度化时间项收敛值 `time_term_norm`（见 m5_t23_plan.md §2.2/§4.1）。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "§4.1 必录项全部落盘；分区每档 3 次重复（tip/drag/lift/界面残差逐位一致，median/min/max 全表）；整体每档 1 次有效运行 + 4 次弃用尝试（单独记录）；计时 perf_counter、不含绘图、网格生成单列（≈0.08 s）；线程/硬件/版本记录",
+          "cost_summary": "总耗时（median）：fixed 9.35/18.15/24.81 s、aitken 5.82/7.59/9.47 s、monolithic 890.25/168.78/178.18 s（1e-6/1e-8/1e-10）",
+          "report": "docs/validation/t23.md §8",
+          "data": "results/m5/t23/comparison/cost_per_item.csv、results/m5/t23/environment.json"
+        }
+      },
+      {
+        "id": "23-10",
+        "title": "公平性、落盘与可复现（同机器/同输出/命令可重生成）",
+        "plan_ref": [
+          "spec.md §5.3(1)",
+          "spec.md §5.3(5)",
+          "spec.md §6.2"
+        ],
+        "thresholds": {
+          "same_machine_and_session": true,
+          "same_thread_settings": true,
+          "run_order_recorded": true,
+          "same_output_settings": true,
+          "artifacts_regenerable_from_commands": true,
+          "t20_read_only_reference": true,
+          "results_root": "results/m5/t23/（拟议，待生成）"
+        },
+        "notes": [
+          "T20 结果（results/t20/fsi1/）只读引用；T23 比较以同次运行数据为准。"
+        ],
+        "status": "passed",
+        "evidence": {
+          "result": "同机同会话（environment.json、run_log.jsonl）；baseline 阶段以冻结 cases/fsi1.json 逐位复现 T20 三档（tip_x/tip_y/drag/lift/interface_residual/coupling_iterations abs_diff 全为 0.0，网格单元/界面边一致）；比较表可由命令重生成（compare 纯后处理）；T20 只读引用",
+          "report": "docs/validation/t23.md §3/§5",
+          "data": "results/m5/t23/baseline_fsi1/compare_t20.json、results/m5/t23/run_log.jsonl、results/m5/t23/environment.json"
+        }
+      }
+    ],
+    "verification": {
+      "executed_by": "A7",
+      "date_time": "2026-10-11 23:34 — 2026-10-12 01:49（Asia/Shanghai）",
+      "scope": "T23 实际执行：分区 fixed/Aitken × 3 档 × 3 重复、整体法 3 档定常推进（BDF 固定点、pressure_pin=None）、冻结配置 baseline 三档复现、逐变量一致性与成本汇总。",
+      "environment": {
+        "interpreter": ".venv/bin/python",
+        "python": "3.12.3",
+        "numpy": "2.5.3",
+        "scipy": "1.18.1",
+        "pytest": "9.1.1",
+        "thread_prefix": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1",
+        "cpu": "11th Gen Intel Core i5-11320H",
+        "memory": "16 GB",
+        "git_head": "9647efa0aa25aee72c621289021e872e87363d3d",
+        "code_fingerprint": "results/m5/t23/config_snapshot.json"
+      },
+      "commands": [
+        ".venv/bin/python scripts/m5_compare.py prepare",
+        ".venv/bin/python scripts/m5_compare.py partitioned --methods fixed,aitken --levels 1e-6,1e-8,1e-10 --repeats 3（含 aitken 1e-6 --force 补足 3 重复）",
+        ".venv/bin/python scripts/m5_compare.py monolithic --level 1e-6 --dt 1.0 --order 2 --chunk-steps 5 --max-steps 40 --wall-seconds 2400",
+        ".venv/bin/python scripts/m5_compare.py monolithic --level 1e-8 --dt 1.0 --order 2 --chunk-steps 4 --max-steps 20 --wall-seconds 1200 --force",
+        ".venv/bin/python scripts/m5_compare.py monolithic --level 1e-10 --dt 1.0 --order 2 --chunk-steps 4 --max-steps 16 --wall-seconds 1200 --force",
+        ".venv/bin/python scripts/m5_compare.py baseline",
+        ".venv/bin/python scripts/m5_compare.py compare --levels 1e-6,1e-8,1e-10",
+        ".venv/bin/python -m pytest tests/test_m5_consistency.py -q"
+      ],
+      "item_status": {
+        "passed": 9,
+        "failed": 1,
+        "not_executed": 0
+      },
+      "evidence": "docs/validation/t23.md（命令、环境、逐档运行、平台、逐变量表、成本表、失败与修正）；数据 results/m5/t23/（manifest/environment/config_snapshot/run_log、partitioned-*/、monolithic/、comparison/、baseline_fsi1/、logs/）。",
+      "notes": [
+        "23-08 在 h=0.02 字面门槛下 failed（tip_y/lift 网格分辨率限制，三方法与只读 T20 h=0.02 基线逐位一致；T20 h=0.0075 满足全部门槛）；不擅自改判。",
+        "整体法每档 1 次有效运行（另有 4 次弃用尝试单独记录）；分区法每档 3 次重复且逐位一致。",
+        "阈值未放宽；比较解取最紧档 1e-10，最紧相邻档平台证据见 platform_per_variable.csv。"
+      ]
+    }
+  },
+  "inconsistencies": []
+}

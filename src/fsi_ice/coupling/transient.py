@@ -18,12 +18,21 @@ from fsi_ice.coupling.partitioned import (CouplingOptions, PartitionedEvaluation
                                          solve_dirichlet_neumann)
 from fsi_ice.fluid.ale import build_ale_flow_context
 from fsi_ice.fluid.dynamics import solve_flow_step
+from fsi_ice.fluid.linear_solver import ReusedLUSolver
 from fsi_ice.fluid.taylor_hood import assemble_stokes
 from fsi_ice.interface.geometry import evaluate_interface_geometry
 from fsi_ice.interface.traction import assemble_interface_load
 from fsi_ice.solid.dynamics import solve_solid_step
 from fsi_ice.time.transaction import AcceptedState, StateCoordinator, StepPlan
 from fsi_ice.validation.monolithic import block_scale_vector
+
+
+# Inner Newton solves must also satisfy an absolute share of the coupled gate:
+# their relative criterion scales with the equation magnitudes (ALE RHS/history
+# loads, external solid load) and can leave a raw residual above "residual_max"
+# once the response amplitude grows. The 2-norm bound below implies the
+# max-component bound used by the acceptance gate, with one decade of margin.
+_INNER_GATE_SHARE = 0.1
 
 
 class TransientFSI:
@@ -68,13 +77,19 @@ class TransientFSI:
             "d_m": state.mesh_displacement,
             "g": state.interface.get("g", np.zeros(self.layout.shape_of("g")))})
 
-    def _partitioned(self, view, context, options, tolerance, max_iterations):
+    def _partitioned(self, view, context, options, tolerance, max_iterations,
+                     fluid_absolute=None, solid_absolute=None):
         topology, fluid, solid = self.topology, self.topology.fluid_mesh, self.topology.solid_mesh
         boundary_nodes = fluid.boundary_nodes()
         boundary_index = {int(node): i for i, node in enumerate(boundary_nodes)}
-        counts = {"fluid_solves": 0, "solid_solves": 0, "newton_iterations": 0, "linear_solves": 0}
+        counts = {"fluid_solves": 0, "solid_solves": 0, "newton_iterations": 0, "linear_solves": 0,
+                  "fluid_factorizations": 0, "fluid_krylov_iterations": 0}
+        flow_initial = np.r_[view.base.velocity.ravel(), view.base.pressure]
+        linear_solver = ReusedLUSolver(velocity_dofs=self.layout.size_of("u_f"),
+                                       density=self.density, reuse_across_candidates=True)
 
         def evaluate(displacement):
+            nonlocal flow_initial
             ds = displacement.reshape(solid.points.shape)
             vs = view.solid_context.coefficient*ds + view.solid_context.history_term[0]
             boundary = np.zeros((len(boundary_nodes), 2))
@@ -91,8 +106,9 @@ class TransientFSI:
             prescribed[topology.fluid_p2_nodes] = (topology.H @ vs.ravel()[topology.solid_dofs]).reshape(-1, 2)
             solution = solve_flow_step(operators, prescribed[nodes], view.fluid_context,
                 tags=tags, pressure_pin=None, ale_context=ale,
-                initial=np.r_[view.base.velocity.ravel(), view.base.pressure],
-                tolerance=tolerance, max_iterations=max_iterations)
+                initial=flow_initial, linear_solver=linear_solver,
+                tolerance=tolerance, absolute_tolerance=fluid_absolute, max_iterations=max_iterations)
+            flow_initial = np.r_[solution.velocity.ravel(), solution.pressure]
             interface = evaluate_interface_geometry(topology, geometry.current_mesh, operators.space, ds,
                                                      candidate_id=context.candidate_id)
             load = assemble_interface_load(topology, interface, operators, solution,
@@ -100,7 +116,8 @@ class TransientFSI:
             external = np.zeros(2*solid.n_nodes)
             external[topology.solid_dofs] = load.f_s_gamma
             state, solid_result = solve_solid_step(solid, self.material, external, self.solid_nodes,
-                view.solid_context, initial=ds, tolerance=tolerance, max_iterations=max_iterations)
+                view.solid_context, initial=ds, tolerance=tolerance,
+                absolute_tolerance=solid_absolute, max_iterations=max_iterations)
             counts["fluid_solves"] += 1
             counts["solid_solves"] += 1
             iterations = len(solution.nonlinear_history)+len(solid_result.nonlinear_history)-2
@@ -113,7 +130,10 @@ class TransientFSI:
 
         result = solve_dirichlet_neumann(evaluate, view.base.solid_state[0].ravel(),
                      scales=self.scales[self.layout.slice_of("d_s")], options=options)
-        return result.evaluation.fluid, {**counts, "coupling_iterations": len(result.history),
+        return result.evaluation.fluid, {**counts,
+            "fluid_factorizations": linear_solver.factorizations,
+            "fluid_krylov_iterations": linear_solver.iterations,
+            "coupling_iterations": len(result.history),
             "iqn_updates": sum(row.relaxation_reason == "iqn" for row in result.history),
             "iqn_restarts": sum(row.relaxation_reason == "iqn_restart" for row in result.history),
             "interface_residual": result.history[-1].residual_norm,
@@ -140,6 +160,10 @@ class TransientFSI:
         coupling.update(method=method if method != "monolithic" else "fixed", case_name="transient-fsi")
         coupling_options = CouplingOptions(**coupling)
         newton = NewtonOptions(atol=1e-10, rtol=1e-12) if newton is None else newton
+        # Gate-derived absolute targets for the single-field Newton solves.
+        inner_absolute = _INNER_GATE_SHARE*residual_max
+        fluid_absolute = inner_absolute*float(np.max(self.scales[self.layout.slice_of("u_f")]))
+        solid_absolute = inner_absolute*float(np.max(self.scales[self.layout.slice_of("v_s")]))
         cache = {}
 
         def displacement(view):
@@ -153,7 +177,7 @@ class TransientFSI:
                 counts["coupling_iterations"] = 0
             else:
                 x, counts = self._partitioned(view, context, coupling_options, single_tolerance,
-                                              newton.max_iterations)
+                                              newton.max_iterations, fluid_absolute, solid_absolute)
             cache.update(context=context, x=x, blocks=self.layout.unpack(x), counts=counts,
                          solve_seconds=perf_counter()-started)
             return cache["blocks"]["d_m"]

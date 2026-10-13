@@ -5,7 +5,8 @@ from scipy.sparse.linalg import LinearOperator, gmres, splu
 
 
 class ReusedLUSolver:
-    def __init__(self, *, refresh_interval=20, velocity_dofs=None, density=1.0):
+    def __init__(self, *, refresh_interval=20, velocity_dofs=None, density=1.0,
+                 reuse_across_candidates=False):
         if not isinstance(refresh_interval, int) or isinstance(refresh_interval, bool) or refresh_interval < 1:
             raise ValueError("LU refresh interval must be a positive integer.")
         self.refresh_interval = refresh_interval
@@ -14,6 +15,9 @@ class ReusedLUSolver:
             raise ValueError("Invalid pressure scaling parameters.")
         self.velocity_dofs = velocity_dofs
         self.density = density
+        if not isinstance(reuse_across_candidates, bool):
+            raise ValueError("reuse_across_candidates must be a bool.")
+        self.reuse_across_candidates = reuse_across_candidates
         self._factor = None
         self._free = None
         self._uses = 0
@@ -23,7 +27,12 @@ class ReusedLUSolver:
         self._signature = None
 
     def prepare(self, time_coefficient, *, signature=None):
-        if self._time_coefficient != time_coefficient or (signature is not None and signature != self._signature):
+        # A factor from another candidate may only serve as a preconditioner
+        # for GMRES on the *current* matrix. solve() checks the true current
+        # residual and refactors on any failure. The default keeps the older
+        # strict invalidation behavior used outside the FSI2 step workspace.
+        if self._time_coefficient != time_coefficient or (not self.reuse_across_candidates and
+                signature is not None and signature != self._signature):
             self._factor = None
         self._time_coefficient = time_coefficient
         self._signature = signature

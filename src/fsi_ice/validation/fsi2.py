@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import find_peaks
 
+from fsi_ice.ale import build_interface_weighted_extension
 from fsi_ice.coupling.newton import NewtonOptions
 from fsi_ice.coupling.partitioned import CouplingOptions
 from fsi_ice.coupling.transient import TransientFSI
@@ -28,7 +29,8 @@ def inflow_factor(time):
 def validate_fsi2_config(config):
     required = {"case", "mesh_size", "dt", "end_time", "order", "method", "fluid", "solid",
                 "coupling", "solver", "acceptance", "reference", "provenance"}
-    if not isinstance(config, dict) or set(config) != required or config["case"] != "fsi2":
+    if not isinstance(config, dict) or not required <= set(config) or \
+            not set(config) <= required | {"mesh_motion"} or config["case"] != "fsi2":
         raise ValueError("Invalid FSI2 config schema.")
 
     def positive(value):
@@ -37,6 +39,13 @@ def validate_fsi2_config(config):
     for name in ("mesh_size", "dt", "end_time"):
         if not positive(config[name]):
             raise ValueError(f"{name} must be finite and positive.")
+    if "mesh_motion" in config:
+        motion = config["mesh_motion"]
+        if not isinstance(motion, dict) or motion.get("model") not in ("harmonic", "weighted_harmonic"):
+            raise ValueError("Invalid mesh_motion model.")
+        expected = {"model"} if motion["model"] == "harmonic" else {"model", "length", "power"}
+        if set(motion) != expected or any(not positive(motion[key]) for key in expected-{"model"}):
+            raise ValueError("Invalid mesh_motion reference weight parameters.")
     if isinstance(config["order"], bool) or not isinstance(config["order"], int) or config["order"] not in (1, 2):
         raise ValueError("order must be 1 or 2.")
     if config["method"] not in ("fixed", "aitken", "iqn", "monolithic"):
@@ -145,6 +154,10 @@ def analyze_fsi2(rows, config):
 
 def build_fsi2_problem(config, output):
     problem = SteadyFSI1Problem(config, config["mesh_size"], Path(output)/"mesh")
+    motion = config.get("mesh_motion", {"model": "harmonic"})
+    if motion["model"] == "weighted_harmonic":
+        problem.extension = build_interface_weighted_extension(problem.fluid_mesh,
+            interface_tag="fluid-interface", length=motion["length"], power=motion["power"])
 
     def monitor(view, blocks):
         operators = assemble_stokes(view.geometry.current_mesh, density=1000., viscosity=1.)

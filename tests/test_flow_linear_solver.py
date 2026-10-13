@@ -29,6 +29,31 @@ def test_reused_factor_solves_current_jacobian_and_refreshes():
         ReusedLUSolver().solve(csr_matrix((3, 3)), np.ones(3), np.array([0]))
 
 
+def test_previous_candidate_lu_only_preconditions_current_equation():
+    operators = assemble_stokes(rectangle_mesh(4), density=1000)
+    fixed, _ = flow_constraints(operators, [0, 0])
+    rng = np.random.default_rng(20261013)
+    state = .01*rng.normal(size=operators.n_total)
+    _, first = navier_stokes_residual(operators, state, time_coefficient=100,
+                                     time_rhs=np.zeros(operators.n_velocity))
+    _, second = navier_stokes_residual(operators, state+1e-6*rng.normal(size=len(state)),
+                                      time_coefficient=100,
+                                      time_rhs=np.zeros(operators.n_velocity))
+    rhs = rng.normal(size=operators.n_total)
+    solver = ReusedLUSolver(velocity_dofs=operators.n_velocity, density=1000,
+                            reuse_across_candidates=True)
+    solver.prepare(100, signature="candidate-a")
+    solver.solve(first, rhs, fixed, signature="candidate-a")
+    assert solver.factorizations == 1
+    solver.prepare(100, signature="candidate-b")
+    with pytest.raises(ValueError, match="signature"):
+        solver.solve(second, rhs, fixed, signature="candidate-a")
+    answer = solver.solve(second, rhs, fixed, signature="candidate-b")
+    expected = solve_dirichlet(second, rhs, fixed, 0).values
+    np.testing.assert_allclose(answer, expected, rtol=1e-9, atol=1e-8)
+    assert solver.factorizations == 1
+
+
 def test_transient_flow_direct_and_reused_factor_reach_same_solution():
     mesh = rectangle_mesh(4)
     base = assemble_stokes(mesh, body_force=manufactured_force)

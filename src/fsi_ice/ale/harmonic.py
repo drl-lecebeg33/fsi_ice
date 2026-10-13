@@ -26,14 +26,17 @@ class HarmonicExtension:
     def __init__(self, reference_mesh, *, diffusion=1.0):
         if not isinstance(reference_mesh, TriMesh):
             raise ValueError("reference_mesh must be a TriMesh.")
-        if isinstance(diffusion, bool):
-            raise ValueError("diffusion must be a finite positive scalar.")
-        try:
-            value = float(diffusion)
-        except (TypeError, ValueError):
-            raise ValueError("diffusion must be a finite positive scalar.") from None
-        if not np.isfinite(value) or value <= 0:
-            raise ValueError("diffusion must be a finite positive scalar.")
+        if callable(diffusion):
+            value = diffusion
+        else:
+            if isinstance(diffusion, bool):
+                raise ValueError("diffusion must be a finite positive scalar or reference field.")
+            try:
+                value = float(diffusion)
+            except (TypeError, ValueError):
+                raise ValueError("diffusion must be a finite positive scalar or reference field.") from None
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError("diffusion must be a finite positive scalar or reference field.")
         self.reference_mesh = reference_mesh
         self.diffusion = value
         self._matrix, self._rhs = assemble_poisson(reference_mesh, 0.0, value)
@@ -94,3 +97,35 @@ class HarmonicExtension:
 def build_harmonic_extension(reference_mesh, *, diffusion=1.0):
     """Assemble the reference Laplace stiffness once; extend() solves candidates."""
     return HarmonicExtension(reference_mesh, diffusion=diffusion)
+
+
+def build_interface_weighted_extension(reference_mesh, *, interface_tag, length, power=1.0):
+    """Fixed reference weight (length/sqrt(distance**2+length**2))**power.
+
+    Distance is to the reference interface segments, in mesh length units.
+    The positive scalar weight stiffens the near-interface region relative to
+    the far field. It changes the mesh equation only; it is not a material law.
+    Reference weights give exactly the same constant stiffness to partitioned
+    extension and the monolithic mesh residual/Jacobian.
+    """
+    for name, value in (("length", length), ("power", power)):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float)) or \
+                not np.isfinite(value) or value <= 0:
+            raise ValueError(f"Mesh weight {name} must be a finite positive number.")
+    if interface_tag not in reference_mesh.boundaries:
+        raise ValueError(f"Unknown mesh weight interface tag: {interface_tag}.")
+    segments = reference_mesh.points[reference_mesh.boundaries[interface_tag]].copy()
+    if not len(segments):
+        raise ValueError("Mesh weight interface must contain boundary segments.")
+    segments.setflags(write=False)
+
+    def weight(points):
+        distance_squared = np.full(len(points), np.inf)
+        for start, end in segments:
+            direction = end-start
+            fraction = np.clip((points-start) @ direction / (direction @ direction), 0., 1.)
+            delta = points-start-fraction[:, None]*direction
+            distance_squared = np.minimum(distance_squared, np.sum(delta*delta, axis=1))
+        return (length/np.sqrt(distance_squared+length*length))**power
+
+    return HarmonicExtension(reference_mesh, diffusion=weight)

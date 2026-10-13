@@ -1,6 +1,7 @@
 """ALE flow context: geometry-consistent BDF masses, swept transport and Jacobian blocks."""
 
 from dataclasses import dataclass
+from functools import cached_property
 
 import numpy as np
 from scipy.sparse import bmat, csr_matrix
@@ -25,6 +26,15 @@ class ALEFlowContext:
     transport: GCLTransport
     stencil: BDFStencil
     history_velocities: tuple
+
+    @cached_property
+    def _history_loads(self):
+        # Owned by one immutable candidate context, keyed by physical density.
+        return {}
+
+    @cached_property
+    def _transport_matrices(self):
+        return {}
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,11 @@ def validate_ale_velocity_context(ale_context, mesh_context):
 
 def history_mass_load(operators, ale_context):
     """sum_j a_j M_j u_j over accepted configurations (candidate handled separately)."""
+    if ale_context.geometry.current_mesh is not operators.space.mesh:
+        raise ValueError("ALE history cache requires its own candidate operators.")
+    key = float(operators.density)
+    if key in ale_context._history_loads:
+        return ale_context._history_loads[key]
     load = np.zeros(operators.n_velocity)
     coefficients = ale_context.stencil.coefficients
     for coefficient, geometry, velocity in zip(
@@ -96,6 +111,8 @@ def history_mass_load(operators, ale_context):
     ):
         mass = assemble_velocity_mass(geometry.current_mesh, density=operators.density)
         load += coefficient*(mass @ velocity.ravel())
+    load.setflags(write=False)
+    ale_context._history_loads[key] = load
     return load
 
 
@@ -130,7 +147,14 @@ def ale_navier_stokes_residual(operators, values, ale_context, *, with_jacobian=
     residual[:n_velocity] += history_mass_load(operators, ale_context)
     coefficient = float(ale_context.stencil.coefficients[0])
     residual[:n_velocity] += coefficient*(operators.mass @ values[:n_velocity])
-    transport_matrix = mesh_transport_matrix(operators, ale_context.transport)
+    key = float(operators.density)
+    if key not in ale_context._transport_matrices:
+        matrix = mesh_transport_matrix(operators, ale_context.transport)
+        matrix.data.setflags(write=False)
+        matrix.indices.setflags(write=False)
+        matrix.indptr.setflags(write=False)
+        ale_context._transport_matrices[key] = matrix
+    transport_matrix = ale_context._transport_matrices[key]
     residual[:n_velocity] += transport_matrix @ values[:n_velocity]
     if not with_jacobian:
         return residual, None

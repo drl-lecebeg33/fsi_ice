@@ -1,0 +1,65 @@
+{
+  "case": "fsi2",
+  "mesh_size": 0.02,
+  "dt": 0.01,
+  "end_time": 20.0,
+  "order": 2,
+  "method": "aitken",
+  "fluid": {
+    "density": 1000.0,
+    "dynamic_viscosity": 1.0,
+    "mean_velocity": 1.0
+  },
+  "solid": {
+    "density": 10000.0,
+    "poisson": 0.4,
+    "young": 1400000.0,
+    "thickness": 1.0
+  },
+  "coupling": {
+    "relaxation": 0.5,
+    "absolute_tolerance": 1e-14,
+    "relative_tolerance": 1e-12,
+    "max_iterations": 160,
+    "iqn_initial_relaxation": 0.5,
+    "iqn_alpha_max": 10.0,
+    "iqn_history_size": 10,
+    "iqn_restart_tolerance": 1.0
+  },
+  "solver": {
+    "single_field_tolerance": 1e-10,
+    "newton_atol": 1e-10,
+    "newton_rtol": 1e-12,
+    "max_iterations": 40
+  },
+  "acceptance": {
+    "residual_max": 1e-07,
+    "continuity_max": 1e-10,
+    "minimum_mesh_quality": 0.1,
+    "period_variation_max": 0.02,
+    "amplitude_variation_max": 0.02,
+    "mean_variation_max": 0.02,
+    "tip_y_amplitude_relative_max": 0.1,
+    "frequency_relative_max": 0.05,
+    "drag_mean_relative_max": 0.1
+  },
+  "reference": {
+    "tip_y_amplitude": 0.0816,
+    "frequency": 1.93,
+    "drag_mean": 215.06
+  },
+  "provenance": {
+    "verified_on": "2026-10-12",
+    "table": "FSI2 4+0, source labels timestep 0.0005",
+    "url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+    "definition_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+    "force": "cylinder plus beam, per unit depth",
+    "reference_time_integrator": "not asserted to match project BDF",
+    "status": "reference targets; project periodic validation pending"
+  },
+  "mesh_motion": {
+    "model": "weighted_harmonic",
+    "length": 0.005,
+    "power": 1.0
+  }
+}

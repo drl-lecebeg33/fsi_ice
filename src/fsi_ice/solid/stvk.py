@@ -75,9 +75,12 @@ def stvk_energy(mesh, material, displacement, external):
 
 
 def solve_stvk(mesh, material, external, fixed_nodes, *, prescribed=(0.0, 0.0), initial=None,
-               tolerance=1e-9, max_iterations=40, mass_coefficient=0.0, mass_rhs=None):
+               tolerance=1e-9, max_iterations=40, absolute_tolerance=None,
+               mass_coefficient=0.0, mass_rhs=None):
     if not np.isfinite(tolerance) or tolerance <= 0 or not isinstance(max_iterations, int) or max_iterations < 1:
         raise ValueError("Invalid nonlinear solid solve controls.")
+    if absolute_tolerance is not None and (not np.isfinite(absolute_tolerance) or absolute_tolerance <= 0):
+        raise ValueError("absolute_tolerance must be a finite positive real number when provided.")
     fixed_nodes = np.asarray(fixed_nodes)
     if fixed_nodes.ndim != 1 or not np.issubdtype(fixed_nodes.dtype, np.integer) or np.any(fixed_nodes < 0) or np.any(fixed_nodes >= mesh.n_nodes):
         raise ValueError("Invalid fixed solid nodes.")
@@ -116,7 +119,11 @@ def solve_stvk(mesh, material, external, fixed_nodes, *, prescribed=(0.0, 0.0), 
         residual, matrix = evaluate(values)
         norm = float(np.linalg.norm(residual[free])/scale)
         history.append(norm)
-        if norm <= tolerance:
+        # The relative criterion scales with the external load magnitude; the
+        # optional absolute bound keeps the raw free residual below a caller-given
+        # limit (used by the coupled driver to meet its absolute acceptance gate).
+        if norm <= tolerance and (absolute_tolerance is None or
+                                  float(np.linalg.norm(residual[free])) <= absolute_tolerance):
             deformation = np.eye(2)+np.einsum("eai,eaJ->eiJ", values[mesh.cells], physical_gradients(mesh))
             return NonlinearSolidSolution(values, residual.reshape(-1, 2), tuple(history),
                                           float(np.linalg.det(deformation).min()))

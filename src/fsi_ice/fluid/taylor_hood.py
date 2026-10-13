@@ -1,16 +1,26 @@
 """Physical pressure convention: -div(2 mu eps(u)) + grad(p) = f."""
 
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, lru_cache
 
 import numpy as np
 from scipy.sparse import bmat, coo_matrix, csr_matrix
 
 from fsi_ice.fem.p1 import map_points, shape_values
-from fsi_ice.fem.p2 import P2Space, p2_physical_gradients, p2_values
+from fsi_ice.fem.p2 import P2Space, p2_physical_gradients, p2_reference_gradients, p2_values
 from fsi_ice.fem.poisson import solve_dirichlet
 from fsi_ice.fem.quadrature import triangle_quadrature
 from fsi_ice.solid.linear import vector_dofs, vector_values
+
+
+@lru_cache(maxsize=1)
+def _reference_convection_tensor():
+    points, weights = triangle_quadrature(5)
+    shape = p2_values(points)
+    tensor = np.einsum("q,qa,qb,qcj->abcj", weights, shape, shape,
+                       p2_reference_gradients(points), optimize="greedy")
+    tensor.setflags(write=False)
+    return tensor
 
 
 def scatter_matrix(local, row_dofs, column_dofs, shape):
@@ -45,8 +55,15 @@ class FlowOperators:
     @cached_property
     def convection_tensor(self):
         # Integral N_a*N_b*grad(N_c): exact for the degree-five convective form.
-        shape = p2_values(self.quadrature)
-        tensor = np.einsum("q,qa,qb,eqcj->eabcj", self.weights, shape, shape, self.gradients)
+        # Affine triangles: integrate once on the reference cell, then transform.
+        points, weights = triangle_quadrature(5)
+        if np.array_equal(self.quadrature, points) and np.array_equal(self.weights, weights):
+            tensor = np.einsum("abck,ekj->eabcj", _reference_convection_tensor(),
+                               np.linalg.inv(self.space.mesh.jacobians), optimize="greedy")
+        else:
+            shape = p2_values(self.quadrature)
+            tensor = np.einsum("q,qa,qb,eqcj->eabcj", self.weights, shape, shape, self.gradients,
+                               optimize="greedy")
         tensor *= (self.density*self.space.mesh.determinants)[:, None, None, None, None]
         tensor.flags.writeable = False
         return tensor
@@ -66,7 +83,7 @@ def assemble_stokes(mesh, *, viscosity=1.0, density=1.0, body_force=(0.0, 0.0)):
     strains[:, :, 2, 0::2] = gradients[:, :, :, 1]
     strains[:, :, 2, 1::2] = gradients[:, :, :, 0]
     constitutive = viscosity*np.diag([2.0, 2.0, 1.0])
-    local_a = np.einsum("q,eqai,ab,eqbj->eij", weights, strains, constitutive, strains)
+    local_a = np.einsum("q,eqai,ab,eqbj->eij", weights, strains, constitutive, strains, optimize="greedy")
     local_a *= mesh.determinants[:, None, None]
     divergence_basis = np.empty((mesh.n_cells, len(points), 12))
     divergence_basis[:, :, 0::2] = gradients[:, :, :, 0]
@@ -200,10 +217,12 @@ def navier_stokes_residual(operators, values, *, time_coefficient=0.0, time_rhs=
 
 
 def solve_navier_stokes(operators, velocity, tags=None, *, pressure_pin=0, pressure_value=0.0,
-                        initial=None, tolerance=1e-9, max_iterations=30,
+                        initial=None, tolerance=1e-9, max_iterations=30, absolute_tolerance=None,
                         time_coefficient=0.0, time_rhs=None, linear_solver=None, ale_context=None):
     if not np.isfinite(tolerance) or tolerance <= 0 or not isinstance(max_iterations, int) or max_iterations < 1:
         raise ValueError("Invalid nonlinear solve controls.")
+    if absolute_tolerance is not None and (not np.isfinite(absolute_tolerance) or absolute_tolerance <= 0):
+        raise ValueError("absolute_tolerance must be a finite positive real number when provided.")
     dofs, prescribed = flow_constraints(operators, velocity, tags, pressure_pin=pressure_pin, pressure_value=pressure_value)
     signature = None
     if ale_context is not None:
@@ -236,7 +255,11 @@ def solve_navier_stokes(operators, velocity, tags=None, *, pressure_pin=0, press
                                                     time_rhs=time_rhs, ale_context=ale_context)
         norm = float(np.linalg.norm(residual[free])/scale)
         history.append(norm)
-        if norm <= tolerance:
+        # The relative criterion scales with the equation magnitudes; the optional
+        # absolute bound keeps the raw free residual below a caller-given limit
+        # (used by the coupled driver to meet its absolute acceptance gate).
+        if norm <= tolerance and (absolute_tolerance is None or
+                                  float(np.linalg.norm(residual[free])) <= absolute_tolerance):
             result = unpack_flow(operators, values, norm, history)
             if result.continuity_residual > max(1e-10, tolerance):
                 raise RuntimeError("Flow solution violates the full continuity equation.")

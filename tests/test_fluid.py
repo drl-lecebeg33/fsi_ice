@@ -59,6 +59,26 @@ def test_navier_stokes_poiseuille_and_failed_newton_are_explicit():
                             initial=np.ones(operators.n_total), max_iterations=1, tolerance=1e-14)
 
 
+def test_navier_stokes_absolute_bound_controls_raw_stop():
+    operators = assemble_stokes(rectangle_mesh(4), viscosity=0.1, density=10)
+    velocity = lambda x: np.column_stack((x[:, 1]*(1-x[:, 1]), np.zeros(len(x))))
+    expected = velocity(operators.space.points)
+    initial = np.ones(operators.n_total)
+    # A loose relative tolerance alone stops while the raw residual is still large.
+    loose = solve_navier_stokes(operators, velocity, pressure_value=0.2, initial=initial, tolerance=1.0)
+    assert np.linalg.norm(loose.velocity-expected) > .5
+    # The absolute bound keeps iterating until the raw free residual is small.
+    exact = solve_navier_stokes(operators, velocity, pressure_value=0.2, initial=initial,
+                                tolerance=1.0, absolute_tolerance=1e-12)
+    assert len(exact.nonlinear_history) > len(loose.nonlinear_history)
+    np.testing.assert_allclose(exact.velocity, expected, atol=2e-12)
+    with pytest.raises(RuntimeError, match="did not converge"):
+        solve_navier_stokes(operators, velocity, pressure_value=0.2, initial=initial,
+                            tolerance=1.0, absolute_tolerance=1e-20, max_iterations=4)
+    with pytest.raises(ValueError, match="absolute_tolerance"):
+        solve_navier_stokes(operators, velocity, pressure_value=0.2, absolute_tolerance=0.0)
+
+
 def test_incompatible_boundary_flux_is_rejected():
     operators = assemble_stokes(rectangle_mesh(3))
     with pytest.raises(RuntimeError, match="incompressibility"):

@@ -50,6 +50,26 @@ def test_nonlinear_load_balance_and_failure():
         solve_stvk(mesh, material, force, fixed, max_iterations=1)
 
 
+def test_stvk_absolute_bound_controls_raw_stop():
+    mesh = rectangle_mesh(10, 2, width=1, height=0.2)
+    material = ElasticMaterial(1e4, 0.3)
+    _, force = assemble_elasticity(mesh, material, body_force=[0, -10])
+    fixed = mesh.boundary_nodes("left")
+    reference = solve_stvk(mesh, material, force, fixed)
+    # A loose relative tolerance alone stops at the initial state.
+    loose = solve_stvk(mesh, material, force, fixed, tolerance=1.0)
+    assert np.linalg.norm(loose.displacement-reference.displacement) > 1e-3
+    # The absolute bound keeps iterating down to the raw residual floor.
+    exact = solve_stvk(mesh, material, force, fixed, tolerance=1.0, absolute_tolerance=1e-12)
+    assert len(exact.nonlinear_history) > len(loose.nonlinear_history)
+    np.testing.assert_allclose(exact.displacement, reference.displacement, atol=1e-14)
+    with pytest.raises(RuntimeError, match="failed after"):
+        solve_stvk(mesh, material, force, fixed, tolerance=1.0,
+                   absolute_tolerance=1e-30, max_iterations=4)
+    with pytest.raises(ValueError, match="absolute_tolerance"):
+        solve_stvk(mesh, material, force, fixed, absolute_tolerance=-1.0)
+
+
 @pytest.mark.parametrize("order,minimum", [(1, 0.9), (2, 1.8)])
 def test_bdf_ode_convergence(order, minimum):
     errors = []

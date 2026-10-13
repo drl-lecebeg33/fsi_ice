@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import fsi_ice.validation.fsi2 as fsi2_module
+import fsi_ice.coupling.transient as transient_module
 
 from fsi_ice.ale import build_harmonic_extension
 from fsi_ice.coupling.newton import NewtonOptions
@@ -77,6 +78,33 @@ def test_real_fe_four_methods_three_steps_same_equations(order):
                             .5*previous[method].solid_history[1][0])/.05
             np.testing.assert_allclose(state.solid_state[1], expected, atol=1e-11)
         previous = states
+
+
+def test_step_passes_gate_derived_inner_absolute_tolerances(monkeypatch):
+    driver = small_problem()
+    recorded = []
+    original_flow, original_solid = transient_module.solve_flow_step, transient_module.solve_solid_step
+
+    def flow_step(*args, **kwargs):
+        recorded.append(("flow", kwargs.get("absolute_tolerance")))
+        return original_flow(*args, **kwargs)
+
+    def solid_step(*args, **kwargs):
+        recorded.append(("solid", kwargs.get("absolute_tolerance")))
+        return original_solid(*args, **kwargs)
+
+    monkeypatch.setattr(transient_module, "solve_flow_step", flow_step)
+    monkeypatch.setattr(transient_module, "solve_solid_step", solid_step)
+    residual_max = 1e-7
+    driver.step("iqn", coupling={**COUPLING, "iqn_initial_relaxation": .5,
+                                 "iqn_restart_tolerance": 1., "iqn_history_size": 10},
+                newton=NEWTON, residual_max=residual_max)
+    assert {kind for kind, _ in recorded} == {"flow", "solid"}
+    fluid_scale = float(np.max(driver.scales[driver.layout.slice_of("u_f")]))
+    solid_scale = float(np.max(driver.scales[driver.layout.slice_of("v_s")]))
+    for kind, value in recorded:
+        expected = .1*residual_max*(fluid_scale if kind == "flow" else solid_scale)
+        assert value == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("method", ["aitken", "iqn", "monolithic"])

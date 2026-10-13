@@ -1,6 +1,8 @@
 # fsi_ice 项目任务分工
 
-当前任务（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN从零轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。原8.24秒失败数据保持只读，物理和网格门槛未放宽，M6仍未完成。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
+最新交接（2026-10-13）：单一执行者完成当前加权网格IQN源码从零10 s/1000步正式重跑并自查；第923步及后续均接受，全程物理门槛通过。旧失败数据SHA256未变。周期因振幅仍增长保持INCOMPLETE，M6未完成；已在用户选定的10 s停止计算。[计划](docs/development/m6_10s_run_plan.md)、[验证](docs/validation/m6_10s_run.md)。
+
+上一工作包（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN从零轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。原8.24秒失败数据保持只读，物理和网格门槛未放宽，M6仍未完成。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
 
 本文件定义角色职责、任务依赖和交付流程。项目范围及验收标准以 [spec.md](spec.md) 为准，阶段进度记录在 [gola.md](gola.md)，所有执行者遵守 [AGENTS.md](AGENTS.md)。
 

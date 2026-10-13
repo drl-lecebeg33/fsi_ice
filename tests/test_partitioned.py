@@ -182,8 +182,42 @@ def test_callback_and_option_types_are_validated():
         solve_dirichlet_neumann(None, [0], scales=[1])
     with pytest.raises(TypeError):
         solve_dirichlet_neumann(lambda x: evaluation(x), [0], scales=[1], options={})
+    with pytest.raises(TypeError, match="convergence_check"):
+        solve_dirichlet_neumann(lambda x: evaluation(x), [0], scales=[1], convergence_check=True)
     with pytest.raises(TypeError):
         DirichletNeumannMap(None, lambda x: x, lambda x: x, lambda x: x)
+
+
+def test_optional_physical_check_continues_after_interface_convergence():
+    checked = []
+    def physical(candidate):
+        checked.append(float(candidate.target[0]))
+        return candidate.target[0] >= .9
+    result = solve_dirichlet_neumann(lambda x: evaluation(.5*x+.5), [0.], scales=[1.],
+        options=CouplingOptions(relaxation=1., absolute_tolerance=.3,
+                                relative_tolerance=0., max_iterations=8),
+        convergence_check=physical)
+    assert len(result.history) == 4
+    assert checked == [.75, .875, .9375]
+    assert result.interface_values[0] == pytest.approx(.875)
+    assert result.evaluation.target[0] == pytest.approx(.9375)
+
+
+def test_optional_physical_check_fails_closed_and_preserves_history():
+    options = CouplingOptions(relaxation=1., absolute_tolerance=.3,
+                              relative_tolerance=0., max_iterations=3)
+    with pytest.raises(CouplingFailure, match="physical convergence check") as caught:
+        solve_dirichlet_neumann(lambda x: evaluation(.5*x+.5), [0.], scales=[1.],
+                                options=options, convergence_check=lambda candidate: False)
+    assert len(caught.value.history) == 3
+    with pytest.raises(CouplingFailure, match="must return a boolean") as caught:
+        solve_dirichlet_neumann(lambda x: evaluation(x), [0.], scales=[1.],
+                                convergence_check=lambda candidate: None)
+    assert caught.value.stage == "acceptance"
+    with pytest.raises(CouplingFailure, match="fixed-point precision") as caught:
+        solve_dirichlet_neumann(lambda x: evaluation(x), [0.], scales=[1.],
+                                convergence_check=lambda candidate: False)
+    assert len(caught.value.history) == 1
 
 
 @pytest.fixture

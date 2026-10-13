@@ -231,7 +231,8 @@ class CouplingFailure(RuntimeError):
         super().__init__(f"{case_name}: coupling iteration {iteration}, stage {stage}: {reason}{residual}")
 
 
-def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
+def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None,
+                          convergence_check=None):
     """Evaluate G(x) in order, test its true gap, then apply x += omega*(G(x)-x).
 
     scales is a positive physical scale vector matching initial. Stop when
@@ -242,6 +243,9 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
     the last coefficient; a non-finite calculation fails with diagnostics.
     History relaxation describes the outgoing update, except terminal rows,
     which retain the last coefficient and never apply an unassessed update.
+    An optional convergence_check(evaluation) can require a second, physical
+    acceptance condition. It is called only after the interface gap meets its
+    threshold. False continues the same iteration history; errors fail closed.
 
     For ``method='iqn'``, V contains residual differences y_j, W contains
     output differences s_j+y_j, and (V/scales)*alpha = -r/scales is fitted
@@ -268,6 +272,8 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
     """
     if not callable(evaluate):
         raise TypeError("evaluate must be callable.")
+    if convergence_check is not None and not callable(convergence_check):
+        raise TypeError("convergence_check must be callable.")
     options = CouplingOptions() if options is None else options
     if not isinstance(options, CouplingOptions):
         raise TypeError("options must be CouplingOptions.")
@@ -306,15 +312,27 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
         except Exception as error:
             phase = error.stage if isinstance(error, _StageFailure) else stage
             raise CouplingFailure(options.case_name, iteration, phase, str(error), values, history) from error
-        if norm <= threshold:
-            # 达到界面残差阈值：记录收敛行并返回当前 x 及对应求值
+        interface_converged = norm <= threshold
+        physical_converged = True
+        if interface_converged and convergence_check is not None:
+            try:
+                physical_converged = convergence_check(evaluated)
+                if not isinstance(physical_converged, (bool, np.bool_)):
+                    raise TypeError("convergence_check must return a boolean.")
+            except Exception as error:
+                raise CouplingFailure(options.case_name, iteration, "acceptance", str(error),
+                                      values, history) from error
+        if interface_converged and physical_converged:
+            # 界面与可选物理检查都通过，返回当前输入及其对应单场状态。
             history.append(CouplingIteration(iteration, norm, threshold, relaxation, residual, "converged"))
             evaluation = PartitionedEvaluation(target, evaluated.fluid, evaluated.load, evaluated.solid)
             return CouplingResult(_vector(values, "converged input"), evaluation, tuple(history))
         if iteration == options.max_iterations:
             # 最后一次迭代仍未收敛：记录后以 convergence 阶段终止
             history.append(CouplingIteration(iteration, norm, threshold, relaxation, residual, "max_iterations"))
-            raise CouplingFailure(options.case_name, iteration, "convergence", "maximum iterations exceeded",
+            reason = ("physical convergence check did not pass" if interface_converged else
+                      "maximum iterations exceeded")
+            raise CouplingFailure(options.case_name, iteration, "convergence", reason,
                                   values, history)
         # Promote the pending pair into history once both (s_j, r_j) and r_{j+1}
         # are available. y_j = r_{j+1} − r_j.
@@ -414,6 +432,10 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
                     next_values = _vector(values + applied_update, "IQN-ILS interface input")
         except Exception as error:
             raise CouplingFailure(options.case_name, iteration, "relaxation", str(error), values, history) from error
+        if interface_converged and not physical_converged and np.array_equal(next_values, values):
+            raise CouplingFailure(options.case_name, iteration, "convergence",
+                                  "physical convergence check failed at fixed-point precision",
+                                  values, history)
         if options.method == "iqn":
             # Store (s, r) for the just-applied update; the next iteration forms
             # y = r_{next} − r once r_{next} is computed and promotes the pair.

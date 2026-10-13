@@ -1,6 +1,8 @@
 # fsi_ice
 
-当前任务（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。旧8.24秒失败数据只读保留，物理和网格门槛不变，M6仍未完成。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
+最新进展（2026-10-13）：按用户选定的10 s终点，当前加权网格IQN源码已从零连续接受1000步，正式越过第923步旧失败点；全程物理与网格门槛通过。末段梁尖振幅变化30.9%，周期仍INCOMPLETE，M6未完成。见[10秒重跑验证](docs/validation/m6_10s_run.md)。
+
+上一工作包（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。旧8.24秒失败数据只读保留，物理和网格门槛不变，M6仍未完成。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
 
 基于 Python 的自研流固耦合研究平台，面向分区与整体耦合算法比较及 FSI1/FSI2 基准验证。M0–M5 已完成：数值基础、单场、ALE、界面、事务、分区算法（固定松弛/Aitken）、稳态 FSI1，以及整体耦合（统一残差、完整耦合 Jacobian、整体 Newton、伪时间定常推进）与同一离散配置下的一致性/成本比较均有本地验证证据。M6 进行中：IQN-ILS 已修正残差割线公式并接入 FSI2 瞬态；T18 线性 FE 更新后 IQN 用6次评估达到直接解，小型真实 FE 四方法多步一致性已验证。2026-10-13 动网格修复与性能重写完成本轮实测：加权网格新轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。稳定周期、网格/时间收敛与四算法公平成本比较尚未完成，证据见 [修复验证](docs/validation/m6_repair_performance.md) 与 [IQN瞬态记录](docs/validation/m6_iqn_transient.md)。
 
@@ -26,6 +28,8 @@
 - [T25 IQN-ILS 实现计划](docs/development/t25_plan.md)
 - [T25 IQN-ILS 验收记录](docs/validation/t25.md)
 - [M6 IQN 瞬态接入与公式修正](docs/validation/m6_iqn_transient.md)
+- [M6 第923步故障诊断与分区停止条件修复](docs/validation/m6_physical_gate.md)
+- [M6 当前源码10秒正式重跑](docs/validation/m6_10s_run.md)
 - [M6 长时实验与完整历史续算](docs/validation/m6_long_run.md)
 
 T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足 5% 门槛；完整场、迭代和失败证据可由配置重复生成。
@@ -73,7 +77,7 @@ T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格�
 
 包安装后，`python -m fsi_ice` 或控制台命令 `fsi-ice` 均可从其他目录运行；此时配置和输出路径按当前工作目录解释。`test` 为开发入口，需要保留本地项目及测试目录。
 
-最新求解器全量回归 **704 项通过、2 项跳过**（222.44 s，2026-10-13 最终修复源码；日志 `results/m6/repair/full_tests_final.log`）。两个跳过为既有可选FSI1整体冒烟与T23历史产物检查。完整历史续算的648项基线及真实网格连续4步与2+2分段恢复末态逐数组相同证据见 [长时与续算记录](docs/validation/m6_long_run.md)；独立后处理/研究准备新增26项，相关98项实际通过，见 [后处理记录](docs/validation/m6_postprocess.md)。
+当前源码全量回归 **707 项通过、2 项跳过**（185.76 s，2026-10-13；见[本轮验证](docs/validation/m6_physical_gate.md)）；此前动网格修复源码为704项通过、2项跳过（日志 `results/m6/repair/full_tests_final.log`）。两个跳过为既有可选FSI1整体冒烟与T23历史产物检查。完整历史续算的648项基线及真实网格连续4步与2+2分段恢复末态逐数组相同证据见 [长时与续算记录](docs/validation/m6_long_run.md)；独立后处理/研究准备新增26项，相关98项实际通过，见 [后处理记录](docs/validation/m6_postprocess.md)。
 
 ## 固体与流体验证
 

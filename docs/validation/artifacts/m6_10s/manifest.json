@@ -1,0 +1,17 @@
+{
+  "source_sha256": "7590751f6107bcc4d6d05bbcb3f7ea8cb70f340cd476df7563c1e1e85969c3a6",
+  "files": {
+    "cycles.csv": "b871cac7b22a5f40741fd1a13627805bc456b2bf30be776f7ae5c0de9ada6e7c",
+    "cycles.png": "17d35cd8ca27cca697db71628789c461fc85b6d02d480e53098b61bb5e2bdce3",
+    "history.png": "e28b124f21b7179cc7b0817d91843d840fd17cbc505b1f5102e099f62f03189c",
+    "report.json": "a6b9b0fe45c34d37293383f66611952978a392543d03ddb9795e2db45f04b199",
+    "summary.md": "3a5f616448d3a23e8d731d93b9dcf95e5af68a07f238aac930876dc867ec3586",
+    "verification.json": "d30031e483ef7fd3fd85239e4b83adc78ee650669ca49cd1abcef263795e6a24"
+  },
+  "normalization": {
+    "cycles.csv": {
+      "original_sha256": "c5688a1480ccf44664214126b2b769d7816f584ffc9dc7ba4503e270912cbe83",
+      "operation": "CRLF line endings normalized to LF; numeric values unchanged"
+    }
+  }
+}

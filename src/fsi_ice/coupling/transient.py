@@ -101,7 +101,7 @@ class TransientFSI:
             "d_m": state.mesh_displacement,
             "g": state.interface.get("g", np.zeros(self.layout.shape_of("g")))})
 
-    def _partitioned(self, view, context, options, tolerance, max_iterations,
+    def _partitioned(self, view, context, options, tolerance, max_iterations, residual_max,
                      fluid_absolute=None, solid_absolute=None):
         """中文：用一个时间步的分区 Dirichlet--Neumann 迭代求解。界面未知量取
         完整固体位移（拉直为一维），``evaluate`` 每次给出界面映象 G(x) 及其打包块
@@ -163,9 +163,20 @@ class TransientFSI:
             # 返回 G(x)：target 为固体新位移，fluid 位置暂存打包块向量 x
             return PartitionedEvaluation(state[0].ravel(), x, load, state)
 
+        def physical_convergence(evaluation):
+            # A tiny displacement gap can still produce a large solid momentum
+            # residual. Check the same six-block equation used at transaction
+            # acceptance before ending the interface iteration.
+            residual = evaluate_monolithic(evaluation.fluid, context=context, mode="residual").residual
+            norm = float(np.max(np.abs(residual/self.scales)))
+            if not np.isfinite(norm):
+                raise RuntimeError("Nonfinite coupled residual during partitioned convergence check.")
+            return norm <= residual_max
+
         # 以已接受固体位移为界面初值，界面尺度取 layout 中 d_s 分块的尺度
         result = solve_dirichlet_neumann(evaluate, view.base.solid_state[0].ravel(),
-                     scales=self.scales[self.layout.slice_of("d_s")], options=options)
+                     scales=self.scales[self.layout.slice_of("d_s")], options=options,
+                     convergence_check=physical_convergence)
         # 返回流体解与耦合统计（迭代数、LU/GMRES 工作量、IQN 更新/重启、末次界面残差与松弛因子）
         return result.evaluation.fluid, {**counts,
             "fluid_factorizations": linear_solver.factorizations,
@@ -224,7 +235,7 @@ class TransientFSI:
                 counts["coupling_iterations"] = 0  # 单体路径无外层耦合迭代
             else:
                 x, counts = self._partitioned(view, context, coupling_options, single_tolerance,
-                                              newton.max_iterations, fluid_absolute, solid_absolute)
+                                              newton.max_iterations, residual_max, fluid_absolute, solid_absolute)
             cache.update(context=context, x=x, blocks=self.layout.unpack(x), counts=counts,
                          solve_seconds=perf_counter()-started)
             return cache["blocks"]["d_m"]  # 以网格位移驱动后续几何/网格速度构建

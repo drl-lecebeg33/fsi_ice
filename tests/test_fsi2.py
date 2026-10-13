@@ -107,6 +107,31 @@ def test_step_passes_gate_derived_inner_absolute_tolerances(monkeypatch):
         assert value == pytest.approx(expected)
 
 
+def test_partitioned_step_waits_for_full_physics_gate(monkeypatch):
+    driver, baseline = small_problem(), small_problem()
+    controls = {**COUPLING, "iqn_initial_relaxation": .5,
+                "iqn_restart_tolerance": 1., "iqn_history_size": 10}
+    baseline_state = baseline.step("iqn", coupling=controls, newton=NEWTON)
+    original = transient_module.evaluate_monolithic
+    calls = []
+
+    def reject_first(*args, **kwargs):
+        result = original(*args, **kwargs)
+        calls.append(result)
+        if len(calls) == 1:
+            from types import SimpleNamespace
+            return SimpleNamespace(residual=np.full_like(result.residual, 1e-5))
+        return result
+
+    monkeypatch.setattr(transient_module, "evaluate_monolithic", reject_first)
+    state = driver.step("iqn", coupling=controls, newton=NEWTON)
+    assert len(calls) >= 3  # rejected convergence, accepted convergence, final transaction gate
+    assert state.monitoring[-1]["coupling_iterations"] > baseline_state.monitoring[-1]["coupling_iterations"]
+    assert state.monitoring[-1]["residual"] <= 1e-7
+    np.testing.assert_allclose(driver._initial_vector(state), baseline._initial_vector(baseline_state),
+                               rtol=1e-8, atol=1e-10)
+
+
 @pytest.mark.parametrize("method", ["aitken", "iqn", "monolithic"])
 @pytest.mark.parametrize("failure", ["solve", "validate", "prepare"])
 def test_transaction_failure_retry_matches_baseline(method, failure):

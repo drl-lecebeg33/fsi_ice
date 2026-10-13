@@ -23,9 +23,11 @@ def main(argv=None):
     fsi2 = subparsers.add_parser("fsi2", help="Run the transient Turek-Hron FSI2 benchmark")
     fsi2.add_argument("--config", type=Path, required=True)
     fsi2.add_argument("--output", type=Path, default=Path("results/fsi2"))
-    fsi2.add_argument("--method", choices=("fixed", "aitken", "monolithic"))
+    fsi2.add_argument("--method", choices=("fixed", "aitken", "iqn", "monolithic"))
     fsi2.add_argument("--end-time", type=float, help="Override duration; short runs remain INCOMPLETE")
     fsi2.add_argument("--mesh-size", type=float)
+    fsi2.add_argument("--resume", type=Path, help="Explicit full-history checkpoint; solution.npz is insufficient")
+    fsi2.add_argument("--max-steps", type=int, help="Accept at most this many steps in the current chunk")
     for command in ("solid", "fluid", "single-fields", "csm3", "cfd3"):
         validation = subparsers.add_parser(command, help="Run single-field verification and benchmarks")
         validation.add_argument("--config", type=Path, required=True)
@@ -39,8 +41,12 @@ def main(argv=None):
     try:
         if args.command == "fsi2":
             from fsi_ice.validation.fsi2 import run_fsi2_cli
-            report = run_fsi2_cli(args.config, args.output, method=args.method,
-                                  end_time=args.end_time, mesh_size=args.mesh_size)
+            controls = {"method": args.method, "end_time": args.end_time, "mesh_size": args.mesh_size}
+            if args.resume is not None:
+                controls["resume"] = args.resume
+            if args.max_steps is not None:
+                controls["max_steps"] = args.max_steps
+            report = run_fsi2_cli(args.config, args.output, **controls)
             print(f"{report['status']}: report saved to {args.output.resolve() / 'report.json'}")
             return {"PASS": 0, "FAIL": 1, "INCOMPLETE": 3}[report["status"]]
         if args.command == "fsi1":

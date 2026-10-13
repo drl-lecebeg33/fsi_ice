@@ -47,11 +47,12 @@ def small_problem(order=2):
 
 
 @pytest.mark.parametrize("order", [1, 2])
-def test_real_fe_three_methods_three_steps_same_equations(order):
-    drivers = {method: small_problem(order) for method in ("fixed", "aitken", "monolithic")}
+def test_real_fe_four_methods_three_steps_same_equations(order):
+    drivers = {method: small_problem(order) for method in ("fixed", "aitken", "iqn", "monolithic")}
     previous = {method: driver.coordinator.state for method, driver in drivers.items()}
     for index in range(3):
-        states = {method: driver.step(method, coupling=COUPLING, newton=NEWTON)
+        states = {method: driver.step(method, coupling={**COUPLING,
+                  "iqn_initial_relaxation": .5, "iqn_restart_tolerance": 1., "iqn_history_size": 10}, newton=NEWTON)
                   for method, driver in drivers.items()}
         baseline = states["monolithic"]
         for method, state in states.items():
@@ -65,6 +66,8 @@ def test_real_fe_three_methods_three_steps_same_equations(order):
             assert len(state.monitoring) == index+1
             assert state.monitoring[-1]["order"] == (1 if index == 0 else order)
             assert state.monitoring[-1]["residual"] <= 1e-7
+            if method == "iqn":
+                assert state.monitoring[-1]["iqn_updates"] > 0
             # The velocity actually accepted is the BDF derivative of displacement.
             # Older layer for BDF2 comes from the previous accepted state.
             if index == 0 or order == 1:
@@ -76,7 +79,7 @@ def test_real_fe_three_methods_three_steps_same_equations(order):
         previous = states
 
 
-@pytest.mark.parametrize("method", ["aitken", "monolithic"])
+@pytest.mark.parametrize("method", ["aitken", "iqn", "monolithic"])
 @pytest.mark.parametrize("failure", ["solve", "validate", "prepare"])
 def test_transaction_failure_retry_matches_baseline(method, failure):
     driver, baseline = small_problem(), small_problem()
@@ -119,7 +122,7 @@ def test_inlet_start_and_derivative_are_continuous():
 
 
 @pytest.mark.parametrize("key,value", [("dt", 0), ("dt", True), ("dt", np.nan),
-    ("end_time", .015), ("order", True), ("method", "iqn"), ("mesh_size", "fine")])
+    ("end_time", .015), ("order", True), ("method", "unknown"), ("mesh_size", "fine")])
 def test_invalid_configuration(key, value):
     config = load_fsi2_config(ROOT/"cases/fsi2.json")
     config[key] = value
@@ -136,6 +139,52 @@ def test_standard_materials_and_gates_cannot_be_changed_silently():
     config["acceptance"]["frequency_relative_max"] = .1
     with pytest.raises(ValueError, match="weakened"):
         validate_fsi2_config(config)
+
+
+@pytest.mark.parametrize("key,value", [("iqn_initial_relaxation", 0),
+    ("iqn_alpha_max", np.inf), ("iqn_history_size", -1), ("iqn_history_size", True),
+    ("iqn_history_size", 1.5), ("iqn_restart_tolerance", np.nan), ("unknown", 1.)])
+def test_invalid_iqn_configuration(key, value):
+    config = load_fsi2_config(ROOT/"cases/fsi2.json")
+    config["method"] = "iqn"
+    config["coupling"][key] = value
+    with pytest.raises(ValueError):
+        validate_fsi2_config(config)
+
+
+def test_old_fsi2_configuration_without_iqn_controls_remains_valid():
+    config = load_fsi2_config(ROOT/"cases/fsi2.json")
+    for key in tuple(config["coupling"]):
+        if key.startswith("iqn_"):
+            del config["coupling"][key]
+    validate_fsi2_config(config)
+
+
+def test_iqn_failure_mid_iteration_discards_secants(monkeypatch):
+    import fsi_ice.coupling.transient as transient
+    driver, baseline = small_problem(), small_problem()
+    coupling = {**COUPLING, "iqn_initial_relaxation": .5, "iqn_restart_tolerance": 1.}
+    driver.step("iqn", coupling=coupling, newton=NEWTON)
+    baseline.step("iqn", coupling=coupling, newton=NEWTON)
+    before = driver.coordinator.state
+    original, calls = transient.solve_flow_step, []
+
+    def fail_third(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 3:
+            raise RuntimeError("injected IQN field failure with populated secants")
+        return original(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(transient, "solve_flow_step", fail_third)
+        with pytest.raises(RuntimeError, match="populated secants"):
+            driver.step("iqn", coupling=coupling, newton=NEWTON)
+    assert len(calls) == 3
+    assert driver.coordinator.state is before and driver.coordinator.active is None
+    actual = driver.step("iqn", coupling=coupling, newton=NEWTON)
+    expected = baseline.step("iqn", coupling=coupling, newton=NEWTON)
+    np.testing.assert_array_equal(driver._initial_vector(actual), baseline._initial_vector(expected))
+    assert actual.monitoring[-1]["coupling_iterations"] == expected.monitoring[-1]["coupling_iterations"]
 
 
 def test_periodic_analysis_is_time_weighted_and_short_runs_incomplete():
@@ -164,7 +213,8 @@ def test_input_failure_clears_old_success(tmp_path):
 
 
 @pytest.mark.parametrize("failure", [None, "setup", "monitor_output", "output"])
-def test_cli_driver_outputs_short_status_and_durable_failure(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("method", ["aitken", "iqn"])
+def test_cli_driver_outputs_short_status_and_durable_failure(tmp_path, monkeypatch, failure, method):
     config = load_fsi2_config(ROOT/"cases/fsi2.json")
     config.update(dt=.05, end_time=.15)
     path = tmp_path/"config.json"
@@ -183,16 +233,16 @@ def test_cli_driver_outputs_short_status_and_durable_failure(tmp_path, monkeypat
     if failure == "monitor_output":
         monkeypatch.setattr(fsi2_module, "write_csv", fail)
     if failure == "output":
-        monkeypatch.setattr(fsi2_module.np, "savez_compressed", fail)
+        monkeypatch.setattr(fsi2_module, "_write_final_solution", fail)
     if failure:
         with pytest.raises(OSError, match="injected"):
-            run_fsi2_cli(path, tmp_path, progress=None)
+            run_fsi2_cli(path, tmp_path, method=method, progress=None)
         record = json.loads((tmp_path/"failure.json").read_text())
         assert record["stage"] == failure
         assert record["accepted_steps"] == {"setup": 0, "monitor_output": 1, "output": 3}[failure]
         assert not (tmp_path/"report.json").exists() and not (tmp_path/"solution.npz").exists()
     else:
-        report = run_fsi2_cli(path, tmp_path, progress=None)
+        report = run_fsi2_cli(path, tmp_path, method=method, progress=None)
         assert report["status"] == "INCOMPLETE" and report["accepted_steps"] == 3
         assert not report["checks"]["periodic_validation_complete"]
         assert (tmp_path/"monitor.csv").exists() and (tmp_path/"solution.npz").exists()
@@ -203,6 +253,22 @@ def test_invalid_override_records_input_failure_without_nonfinite_json(tmp_path)
         run_fsi2_cli(ROOT/"cases/fsi2.json", tmp_path, end_time=np.nan, progress=None)
     record = json.loads((tmp_path/"failure.json").read_text())
     assert record["stage"] == "input" and record["config"] is None
+
+
+def test_cli_accepts_iqn_and_preserves_incomplete_exit_code(tmp_path, monkeypatch):
+    from fsi_ice.cli import main
+    calls = []
+
+    def run(config, output, **kwargs):
+        calls.append((config, output, kwargs))
+        return {"status": "INCOMPLETE"}
+
+    monkeypatch.setattr(fsi2_module, "run_fsi2_cli", run)
+    result = main(["fsi2", "--config", str(ROOT/"cases/fsi2.json"), "--output", str(tmp_path),
+                   "--method", "iqn", "--mesh-size", "0.03", "--end-time", "0.03"])
+    assert result == 3
+    assert calls == [(ROOT/"cases/fsi2.json", tmp_path,
+                      {"method": "iqn", "mesh_size": .03, "end_time": .03})]
 
 
 @pytest.mark.parametrize("kwargs", [{"residual_max": np.nan}, {"minimum_quality": 0},

@@ -114,6 +114,8 @@ class TransientFSI:
         result = solve_dirichlet_neumann(evaluate, view.base.solid_state[0].ravel(),
                      scales=self.scales[self.layout.slice_of("d_s")], options=options)
         return result.evaluation.fluid, {**counts, "coupling_iterations": len(result.history),
+            "iqn_updates": sum(row.relaxation_reason == "iqn" for row in result.history),
+            "iqn_restarts": sum(row.relaxation_reason == "iqn_restart" for row in result.history),
             "interface_residual": result.history[-1].residual_norm,
             "relaxation": result.history[-1].relaxation}
 
@@ -125,8 +127,8 @@ class TransientFSI:
         seams for callers and fault tests. A raised exception leaves the accepted
         root untouched; the coordinator retains the failure audit.
         """
-        if method not in ("fixed", "aitken", "monolithic"):
-            raise ValueError("method must be fixed, aitken or monolithic.")
+        if method not in ("fixed", "aitken", "iqn", "monolithic"):
+            raise ValueError("method must be fixed, aitken, iqn or monolithic.")
         for name, value in (("single_tolerance", single_tolerance), ("residual_max", residual_max),
                             ("continuity_max", continuity_max), ("minimum_quality", minimum_quality)):
             if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float)) or \

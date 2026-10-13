@@ -17,6 +17,39 @@ def evaluation(target, fluid=None, load=None, solid=None):
     return PartitionedEvaluation(np.asarray(target), fluid, load, solid)
 
 
+@pytest.mark.parametrize("omega", [0.25, 0.5, 1.0])
+def test_noncontractive_scalar_uses_inverse_residual_secant(omega):
+    # Direct fixed-point iteration has slope -2 and diverges. A residual
+    # secant gives the exact root after the seed and one QN update.
+    result = solve_dirichlet_neumann(lambda x: evaluation(1-2*x), [0.], scales=[1.],
+        options=CouplingOptions(method="iqn", iqn_initial_relaxation=omega,
+            absolute_tolerance=1e-12, relative_tolerance=0., max_iterations=3))
+    assert result.interface_values[0] == pytest.approx(1/3, abs=1e-12)
+    assert len(result.history) == 3
+
+
+def test_multisecant_noncontractive_map_and_unit_invariance():
+    matrix = np.array([[-1.5, .4], [.2, -2.]])
+    rhs = np.array([1., -2.])
+    options = CouplingOptions(method="iqn", iqn_initial_relaxation=.25,
+        iqn_history_size=2, iqn_restart_tolerance=1., iqn_alpha_max=100.,
+        absolute_tolerance=1e-12, relative_tolerance=0., max_iterations=4)
+    expected = np.linalg.solve(np.eye(2)-matrix, rhs)
+    trajectories = []
+    for units in (np.ones(2), np.array([1e-3, 1e3])):
+        inputs = []
+
+        def evaluate(x):
+            inputs.append(x/units)
+            return evaluation(units*(matrix @ (x/units)+rhs))
+
+        result = solve_dirichlet_neumann(evaluate, np.zeros(2), scales=units,
+                                        options=options)
+        np.testing.assert_allclose(result.interface_values/units, expected, atol=1e-10, rtol=0.)
+        trajectories.append(inputs)
+    np.testing.assert_allclose(trajectories[0], trajectories[1], atol=1e-12, rtol=1e-12)
+
+
 @pytest.mark.parametrize("slope", [-0.5, 0.25])
 def test_scalar_dynamic_update_reaches_direct_solution_in_two_to_five_evaluations(slope):
     inputs = []
@@ -85,39 +118,27 @@ def test_already_converged_after_initial_seed_uses_clean_history_state():
 
 
 def test_restart_fires_when_history_collapses_to_a_dependent_stack():
-    """A map that converges in one step forces y_j = 0 on the second iteration,
-    making V rank-deficient. The controller must record ``iqn_restart`` and
-    clear the history so the next iteration uses the seed label."""
-    counts = [0]
-
-    def evaluate(x):
-        counts[0] += 1
-        if counts[0] == 1:
-            return evaluation(np.array([1.0, 1.0]), x.copy())
-        # From x_new = x + 0.5*r we land on (1.5, 1.5); G there = (1.5, 1.5).
-        return evaluation(np.array([1.5, 1.5]), x.copy())
-
-    options = CouplingOptions(method="iqn", iqn_initial_relaxation=0.5, max_iterations=8,
-                              absolute_tolerance=1e-12, relative_tolerance=1e-11)
-    result = solve_dirichlet_neumann(evaluate, np.zeros(2), scales=np.ones(2), options=options)
-    reasons = [row.relaxation_reason for row in result.history]
-    assert reasons[0] == "iqn_initial"
-    # The fixed point is (1.5, 1.5) and the iteration reaches it directly.
-    np.testing.assert_allclose(result.interface_values, [1.5, 1.5])
-    # y_1 = r_2 - r_1 = 0, so the next V is rank-deficient → must restart.
-    assert "iqn_restart" in reasons or reasons[-1] == "converged"
+    # Constant nonzero residual has y=0: the residual-difference matrix
+    # truly has rank zero. Every attempted secant must restart to omega*r.
+    options = CouplingOptions(method="iqn", iqn_initial_relaxation=.5, max_iterations=4)
+    with pytest.raises(CouplingFailure) as caught:
+        solve_dirichlet_neumann(lambda x: evaluation(x+1), np.zeros(2),
+                                scales=np.ones(2), options=options)
+    assert [row.relaxation_reason for row in caught.value.history] == [
+        "iqn_initial", "iqn_restart", "iqn_restart", "max_iterations"]
+    np.testing.assert_array_equal(caught.value.interface_values, [1.5, 1.5])
 
 
 def test_alpha_clip_triggers_restart_when_residual_explodes():
     """A purely additive map x* = 1 forces a huge alpha when IQN-ILS tries to
     invert the implied Jacobian; iqn_alpha_max must clip that into a restart."""
     def evaluate(x):
-        return evaluation(np.ones_like(x) + 0.5*x, x.copy())
+        return evaluation(np.ones_like(x) + 0.75*x, x.copy())
     options = CouplingOptions(method="iqn", iqn_initial_relaxation=1.0, iqn_alpha_max=1.0,
                               iqn_history_size=3, max_iterations=200,
                               absolute_tolerance=1e-12, relative_tolerance=1e-11)
     result = solve_dirichlet_neumann(evaluate, np.zeros(1), scales=[1.0], options=options)
-    assert np.max(np.abs(result.interface_values - 2.0)) <= 1e-9
+    assert np.max(np.abs(result.interface_values - 4.0)) <= 1e-9
     reasons = [row.relaxation_reason for row in result.history]
     # When the iqn_alpha_max is small the controller may need to restart.
     assert any(reason == "iqn_restart" for reason in reasons)
@@ -232,6 +253,9 @@ def test_real_fe_iqn_matches_direct_and_retry_preserves_accepted_histories():
     config["coupling"]["iqn_initial_relaxation"] = 0.5
     config["coupling"]["iqn_history_size"] = 5
     config["coupling"]["iqn_alpha_max"] = 10.0
+    # A partly populated secant space normally leaves a nonzero LS residual.
+    # Permit that projection while retaining rank/alpha/finiteness guards.
+    config["coupling"]["iqn_restart_tolerance"] = 1.0
     problem = LinearCoupledProblem(config)
     snapshot = problem.history_snapshot()
     options = CouplingOptions(**config["coupling"])

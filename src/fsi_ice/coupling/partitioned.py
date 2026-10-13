@@ -1,4 +1,4 @@
-"""Dirichlet--Neumann iteration with fixed or scaled Aitken relaxation.
+"""Dirichlet--Neumann iteration with fixed, scaled Aitken or IQN-ILS updates.
 
 Callbacks evaluate candidates against a fixed accepted history. They must not
 accept time histories or publish states. The outer full-field transaction owns
@@ -203,9 +203,10 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
     History relaxation describes the outgoing update, except terminal rows,
     which retain the last coefficient and never apply an unassessed update.
 
-    For ``method='iqn'`` the update is x_{k+1} = x_k − V_k·α_k where V_k has
-    columns v_j = s_j + ω_0·y_j, α_k solves V_k·α = −r_k in the least-squares
-    sense, and ω_0 = ``iqn_initial_relaxation``. Iteration 1 has no history and
+    For ``method='iqn'``, V contains residual differences y_j, W contains
+    output differences s_j+y_j, and (V/scales)*alpha = -r/scales is fitted
+    in least squares. The update is x_new = G(x) + W*alpha, the standard
+    IQN-ILS inverse-residual secant update. Iteration 1 has no history and
     falls back to ω_0·r_k. Restart clears the stored pairs and falls back to
     the same ω_0·r_k step. Restart fires when LS reports a numerically
     rank-deficient V, any α exceeds ``iqn_alpha_max``, or the relative LS
@@ -301,18 +302,22 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
                 relaxation = iqn_omega0
                 relaxation_reason = "iqn_initial"
             else:
-                V = np.column_stack([s_j + iqn_omega0*y_j for s_j, y_j in iqn_history])
                 try:
-                    alpha, used, ls_residual = _iqn_solve(V, -residual)
-                except (np.linalg.LinAlgError, ValueError) as error:
+                    with np.errstate(over="raise", invalid="raise", divide="raise"):
+                        V = np.column_stack([y_j for _, y_j in iqn_history]) / scales[:, None]
+                        W = np.column_stack([s_j+y_j for s_j, y_j in iqn_history])
+                        scaled_residual = residual/scales
+                        alpha, used, ls_residual = _iqn_solve(V, -scaled_residual)
+                except (np.linalg.LinAlgError, ValueError, FloatingPointError) as error:
                     history.append(CouplingIteration(iteration, norm, threshold, iqn_omega0, residual,
                                                      "iqn_restart"))
                     raise CouplingFailure(options.case_name, iteration, "relaxation",
                                           f"IQN-ILS linear solve failed: {error}", values, history) from error
                 alpha_inf = _iqn_max_alpha(alpha)
-                reference_scale = max(norm, magnitude, np.finfo(float).tiny)
+                reference_scale = max(float(np.linalg.norm(scaled_residual)), np.finfo(float).tiny)
                 restart = (used < len(iqn_history)
                            or not np.isfinite(alpha_inf)
+                           or not np.isfinite(ls_residual)
                            or alpha_inf > options.iqn_alpha_max
                            or (ls_residual > 0
                                and ls_residual / reference_scale > options.iqn_restart_tolerance))
@@ -323,14 +328,15 @@ def solve_dirichlet_neumann(evaluate, initial, *, scales, options=None):
                 else:
                     relaxation = alpha_inf
                     relaxation_reason = "iqn"
-                    applied_update = V @ alpha
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        applied_update = residual + W @ alpha
         history.append(CouplingIteration(iteration, norm, threshold, relaxation, residual, relaxation_reason))
         try:
             with np.errstate(over="raise", invalid="raise"):
                 if applied_update is None:
                     next_values = _vector(values + relaxation*residual, "relaxed interface input")
                 else:
-                    next_values = _vector(values - applied_update, "IQN-ILS interface input")
+                    next_values = _vector(values + applied_update, "IQN-ILS interface input")
         except Exception as error:
             raise CouplingFailure(options.case_name, iteration, "relaxation", str(error), values, history) from error
         if options.method == "iqn":

@@ -16,6 +16,7 @@ from fsi_ice.fluid.taylor_hood import assemble_stokes
 from fsi_ice.validation.common import write_csv, write_report
 from fsi_ice.validation.fluid import inlet_profile
 from fsi_ice.validation.fsi1 import SteadyFSI1Problem
+from fsi_ice.validation.fsi2_checkpoint import load_checkpoint, save_checkpoint, source_digest
 
 
 def inflow_factor(time):
@@ -38,8 +39,8 @@ def validate_fsi2_config(config):
             raise ValueError(f"{name} must be finite and positive.")
     if isinstance(config["order"], bool) or not isinstance(config["order"], int) or config["order"] not in (1, 2):
         raise ValueError("order must be 1 or 2.")
-    if config["method"] not in ("fixed", "aitken", "monolithic"):
-        raise ValueError("method must be fixed, aitken or monolithic.")
+    if config["method"] not in ("fixed", "aitken", "iqn", "monolithic"):
+        raise ValueError("method must be fixed, aitken, iqn or monolithic.")
     steps = config["end_time"]/config["dt"]
     if not np.isfinite(steps) or steps < 1 or not np.isclose(steps, round(steps), rtol=0, atol=1e-8):
         raise ValueError("end_time must be a positive integer multiple of dt.")
@@ -49,8 +50,10 @@ def validate_fsi2_config(config):
         raise ValueError("Standard FSI2 requires the verified original fluid/solid parameters.")
     if any(not positive(value) for group in ("fluid", "solid") for value in config[group].values()):
         raise ValueError("Material values must be finite positive numbers, not booleans.")
-    if not isinstance(config["coupling"], dict) or set(config["coupling"]) != {
-            "relaxation", "absolute_tolerance", "relative_tolerance", "max_iterations"}:
+    coupling_required = {"relaxation", "absolute_tolerance", "relative_tolerance", "max_iterations"}
+    coupling_optional = {"iqn_initial_relaxation", "iqn_alpha_max", "iqn_history_size", "iqn_restart_tolerance"}
+    if not isinstance(config["coupling"], dict) or not coupling_required <= set(config["coupling"]) or \
+            not set(config["coupling"]) <= coupling_required | coupling_optional:
         raise ValueError("Invalid coupling controls.")
     CouplingOptions(**config["coupling"], method="fixed" if config["method"] == "monolithic" else config["method"])
     solver = config["solver"]
@@ -161,12 +164,24 @@ def build_fsi2_problem(config, output):
         dt=config["dt"], order=config["order"], monitor=monitor)
 
 
-def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=None, progress=print):
-    """Fresh trajectory. Does not resume/reuse old solution files implicitly."""
+def _write_final_solution(path, state):
+    np.savez_compressed(path, solid=state.solid_state, velocity=state.velocity,
+        pressure=state.pressure, mesh_displacement=state.mesh_displacement,
+        interface_g=state.interface["g"], mesh_velocity=state.mesh_velocity,
+        time=state.time, step=state.step)
+
+
+def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=None,
+                 resume=None, max_steps=None, progress=print):
+    """Fresh or explicitly resumed trajectory, with a durable accepted root."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
+    protected = None if resume is None else Path(resume).resolve()
     for name in ("report.json", "failure.json", "monitor.csv", "solution.npz"):
-        (output/name).unlink(missing_ok=True)
+        if (output/name).resolve() != protected:
+            (output/name).unlink(missing_ok=True)
+    if resume is None:
+        (output/"checkpoint.npz").unlink(missing_ok=True)
     stage, driver, config = "input", None, None
     try:
         config = load_fsi2_config(config_path)
@@ -174,13 +189,34 @@ def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=N
             if value is not None:
                 config[key] = value
         validate_fsi2_config(config)
+        if max_steps is not None and (isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1):
+            raise ValueError("max_steps must be a positive integer.")
         stage = "setup"
         driver = build_fsi2_problem(config, output)
+        mesh_sha256 = hashlib.sha256((output/"mesh"/"fsi1.msh").read_bytes()).hexdigest()
+        code_sha256 = source_digest()
+        checkpoint_identity = {"config": config, "mesh_sha256": mesh_sha256, "code_sha256": code_sha256}
+        stage = "resume"
+        if resume is not None:
+            recovered = load_checkpoint(resume, **checkpoint_identity)
+            if not np.array_equal(recovered.mesh_current, driver.topology.fluid_mesh.points+recovered.mesh_displacement) or \
+                    (recovered.step and (set(recovered.interface) != {"g"} or
+                     recovered.interface["g"].shape != driver.layout.shape_of("g"))):
+                raise ValueError("Checkpoint current mesh/interface does not match the driver.")
+            driver.coordinator.load(recovered)
+        state = driver.coordinator.state
+        resumed_steps = state.step
+        stage = "checkpoint_output"
+        save_checkpoint(output/"checkpoint.npz", state, **checkpoint_identity)
+        if state.monitoring:
+            stage = "monitor_output"
+            write_csv(output/"monitor.csv", state.monitoring)
         solver, acceptance = config["solver"], config["acceptance"]
         options = NewtonOptions(atol=solver["newton_atol"], rtol=solver["newton_rtol"],
                                 max_iterations=solver["max_iterations"])
         stage = "solve"
-        for _ in range(round(config["end_time"]/config["dt"])):
+        remaining = round(config["end_time"]/config["dt"])-state.step
+        for _ in range(remaining if max_steps is None else min(remaining, max_steps)):
             stage = "solve"
             state = driver.step(config["method"], coupling=config["coupling"], newton=options,
                 single_tolerance=solver["single_field_tolerance"], residual_max=acceptance["residual_max"],
@@ -189,30 +225,38 @@ def run_fsi2_cli(config_path, output, *, method=None, end_time=None, mesh_size=N
             if progress is not None:
                 progress(f"FSI2 {config['method']} step {state.step}, t={state.time:.4f}, R={row['residual']:.2e}", flush=True)
             # Only committed rows reach disk; keep partial evidence on failure.
+            stage = "checkpoint_output"
+            save_checkpoint(output/"checkpoint.npz", state, **checkpoint_identity)
             stage = "monitor_output"
             write_csv(output/"monitor.csv", state.monitoring)
         stage = "analysis"
         analysis = analyze_fsi2(state.monitoring, config)
+        target_complete = state.step == round(config["end_time"]/config["dt"])
+        if not target_complete:
+            analysis = {**analysis, "periodic_status": analysis["status"], "status": "INCOMPLETE",
+                        "reason": "Chunk ended before configured end_time"}
         stage = "output"
-        np.savez_compressed(output/"solution.npz", solid=state.solid_state, velocity=state.velocity,
-                            pressure=state.pressure, mesh_displacement=state.mesh_displacement,
-                            interface_g=state.interface["g"], mesh_velocity=state.mesh_velocity,
-                            time=state.time, step=state.step)
+        _write_final_solution(output/"solution.npz", state)
         report = write_report(output, "fsi2", config, analysis,
-            {"periodic_validation_complete": analysis["status"] != "INCOMPLETE", **analysis["checks"]}, {
+            {"target_time_complete": target_complete,
+             "periodic_validation_complete": analysis["status"] != "INCOMPLETE", **analysis["checks"]}, {
             "scope": "physical trajectory; PASS requires stable cycles and reference gates",
             "residual": "max_i |T21 constrained R_i/S_i|; blocks S=(1,1000,.41,1,.41,215.06)",
-            "force": "cylinder + beam, N per unit depth", "restart": "not implemented",
+            "force": "cylinder + beam, N per unit depth", "restart": "explicit full-history checkpoint only",
             "reference": config["provenance"]})
         report["status"] = analysis["status"]
         report["accepted_steps"] = state.step
-        report["mesh_sha256"] = hashlib.sha256((output/"mesh"/"fsi1.msh").read_bytes()).hexdigest()
+        report["mesh_sha256"] = mesh_sha256
+        report["source_sha256"] = code_sha256
+        report["resumed_steps"] = resumed_steps
+        report["accepted_time"] = state.time
         report["threads"] = {key: os.environ.get(key) for key in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS")}
         (output/"report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)+"\n", encoding="utf-8")
         return report
     except Exception as error:
         (output/"report.json").unlink(missing_ok=True)
-        (output/"solution.npz").unlink(missing_ok=True)
+        if (output/"solution.npz").resolve() != protected:
+            (output/"solution.npz").unlink(missing_ok=True)
         failure = {"case": "fsi2", "status": "FAIL", "stage": stage, "reason": str(error),
                    "config_path": str(config_path), "config": None if stage == "input" else config,
                    "accepted_steps": 0 if driver is None else driver.coordinator.state.step}

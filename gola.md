@@ -1,5 +1,7 @@
 # fsi_ice 开发目标与里程碑
 
+当前任务（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN从零轨迹越过旧第825步停止点（接受922步/9.22 s），随后第923步因全残差门控（1.708e-7>1e-7）如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。原8.24秒失败数据保持只读，物理和网格门槛未放宽。M6仍未完成（稳定周期、网格/时间独立性与四算法公平成本待办）。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
+
 本文件按用户指定名称 `gola.md` 保存，用于跟踪目标和进度。开发规格见 [spec.md](spec.md)，协作规则见 [AGENTS.md](AGENTS.md)。
 
 ## 1. 总目标
@@ -24,7 +26,7 @@
 - [x] 核验 Python 独立环境、数值依赖与绘图/测试工具入口，证据见 [环境记录](docs/environment.md)。
 - [x] 实现首个数值功能及其本地验证：M0 Poisson 收敛与 44 项测试通过，见 [M0 验收记录](docs/validation/m0.md)。
 - [x] M1–M4 完成：固体/流体单场、ALE/界面/事务、分区耦合（固定松弛、Aitken）与稳态 FSI1 均本地验证；M4 提交 `d8817eb`，证据见 [单场验证](docs/validation/single_fields.md)、[M3 矩阵](docs/validation/m3.md)、[T18](docs/validation/t18.md)/[T19](docs/validation/t19.md)/[T20](docs/validation/t20.md)。
-- [x] M5 完成（2026-10-12）：整体残差与完整耦合 Jacobian（T21，方向导数最佳相对误差 7.39e-11 ≤1e-5，独立复核 passed）、整体 Newton 与伪时间定常推进（T22）、同离散配置一致性比较与成本统计（T23，h=0.02、1e-10 档三方法逐变量一致、最不利裕度比 0.984）；证据见 [t21](docs/validation/t21.md)/[t21_review](docs/validation/t21_review.md)/[t22](docs/validation/t22.md)/[t23](docs/validation/t23.md)/[M5 矩阵](docs/validation/m5.md)，本轮改动尚未提交。
+- [x] M5 完成（2026-10-12）：整体残差与完整耦合 Jacobian（T21，方向导数最佳相对误差 7.39e-11 ≤1e-5，独立复核 passed）、整体 Newton 与伪时间定常推进（T22）、同离散配置一致性比较与成本统计（T23，h=0.02、1e-10 档三方法逐变量一致、最不利裕度比 0.984）；证据见 [t21](docs/validation/t21.md)/[t21_review](docs/validation/t21_review.md)/[t22](docs/validation/t22.md)/[t23](docs/validation/t23.md)/[M5 矩阵](docs/validation/m5.md)，M5 改动已提交；当前 IQN 瞬态接入改动尚未提交。
 
 M0/M1/M2/M3 已通过：CSM1/2/3、CFD1/2/3、空间/时间制造解，以及 ALE、界面传递与全场事务（41/41 验收条目）均完成本地验证；M3 冻结状态全量回归 285 项通过。证据见 [单场记录](docs/validation/single_fields.md) 与 [M3 验收矩阵](docs/validation/m3.md)。用户要求继续推进后，T18 固定松弛完成，最新全量回归 338 项通过，见 [T18 记录](docs/validation/t18.md)。M0–M3 已提交并推送为 `2b5f713`；本轮 T18 改动尚未提交或推送。
 
@@ -123,15 +125,25 @@ M0/M1/M2/M3 已通过：CSM1/2/3、CFD1/2/3、空间/时间制造解，以及 AL
 
 依赖：M5，以及单场动力学验证。
 
-状态：**进行中（2026-10-12，T24/T25）**。已核验 FSI2 原始参数与参考表，交付分区/整体瞬态驱动、BDF1/BDF2、全场事务与 CLI。小型真实 FE 三方法三步一致性、接受/回滚/重试与异常管理共27项通过；真实 FSI2 h=0.03、dt=0.01、t=0.03 的 Aitken/整体末态全部逐变量一致（最不利裕度比0.00722），全残差≤1.122e-9。**短程周期状态为 INCOMPLETE，T24完整周期与M6未完成**；证据见 [T24](docs/validation/t24.md)，设计见 [冻结计划](docs/development/m6_t24_plan.md)。
+状态：**本轮试水结束，停止后续推进；M6未完成（2026-10-12）**。已核验 FSI2 原始参数与参考表，交付分区/整体瞬态驱动、BDF1/BDF2、全场事务与 CLI。小型真实 FE 三方法三步一致性、接受/回滚/重试与异常管理共27项通过；真实 FSI2 h=0.03、dt=0.01、t=0.03 的 Aitken/整体末态全部逐变量一致（最不利裕度比0.00722），全残差≤1.122e-9。**短程周期状态为 INCOMPLETE，T24完整周期与M6未完成**；证据见 [T24](docs/validation/t24.md)，设计见 [冻结计划](docs/development/m6_t24_plan.md)。
 
-T25（2026-10-12）IQN-ILS 控制器已交付：`CouplingOptions.method='iqn'`、`iqn_initial_relaxation` / `iqn_alpha_max` / `iqn_history_size` / `iqn_restart_tolerance` 四个新字段；T18 线性 FE 同离散 12 单元三种方法（fixed=27 / Aitken=7 / IQN-ILS=11 次评估）验收通过，位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10；冷启动重试与失败后重启逐数组一致，16 项新测试通过、全量回归 600 passed、2 skipped（M5 冻结 584 + T25 新增 16）。T25 不代替 FSI2 长时验证、四算法比较表与网格/时间收敛研究。证据见 [T25 计划](docs/development/t25_plan.md) 与 [T25 验收](docs/validation/t25.md)。
+历史 T25（2026-10-12，旧更新公式；修正证据见下段）IQN 控制器已交付：`CouplingOptions.method='iqn'`、`iqn_initial_relaxation` / `iqn_alpha_max` / `iqn_history_size` / `iqn_restart_tolerance` 四个新字段；T18 线性 FE 同离散 12 单元三种方法（fixed=27 / Aitken=7 / IQN-ILS=11 次评估）验收通过，位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10；冷启动重试与失败后重启逐数组一致，16 项新测试通过、全量回归 600 passed、2 skipped（M5 冻结 584 + T25 新增 16）。T25 不代替 FSI2 长时验证、四算法比较表与网格/时间收敛研究。证据见 [T25 计划](docs/development/t25_plan.md) 与 [T25 验收](docs/validation/t25.md)。
+
+本轮推进（2026-10-12）：发现并修正旧 IQN 更新公式，加入非收缩解析反例及单位不变性验证；IQN 在 T18 线性 FE 更新后6次评估收敛（旧11次为旧公式历史记录）。已接入 FSI2 配置/CLI/共享瞬态事务，小型真实 FE 四方法 BDF1/BDF2 多步及失败重试通过；真实 h=0.03、dt=0.01、t=0.03 四方法末态一致，最不利裕度比0.026369，全部周期状态 INCOMPLETE。相关211项测试通过、全量621 passed/2 skipped（241.05 s）；h=0.02、dt=0.01的50步启动探索运行到0.5 s（全残差≤2.531e-9、最小网格质量0.728457），周期状态仍为INCOMPLETE；证据见 [本轮记录](docs/validation/m6_iqn_transient.md)。所有物理门槛保持不变。
+
+本轮续算与长时推进（2026-10-12）：完整AcceptedState/BDF历史断点、原子保存、显式resume与max-steps已实现；小型FE及真实网格连续/分段末态逐位相同，相关165项、全量648项通过/2跳过（244.89 s）。h=0.02、dt=0.01的IQN目标20 s长时运行已启动，周期结论待实际数据，不能勾选T24/M6。证据见 [长时记录](docs/validation/m6_long_run.md)。
+
+本轮后处理与T26准备（2026-10-12）：独立只读断点分析已实现JSON/Markdown/周期CSV、真实时程与周期窗口图；新增26项与FSI2/断点相关98项测试通过。真实5.60秒快照保持INCOMPLETE，原701步失败前缀保持FAIL。生成5个独立收敛配置与12个待验证的算法成本配置，尚未启动这些算例；三档Gmsh网格与界面/块布局准备通过，最细档182174个未知量。完整周期、独立收敛与成本结论仍待实际数据；[证据](docs/validation/m6_postprocess.md)。
+
+最新实际运行：修复后的IQN算例在824步、8.24/20 s停止；第825步候选单元体积比0.195848低于原0.2门槛。接受断点完整保留，退出后自动分析已完成，总体FAIL、周期INCOMPLETE。按用户要求本轮仅为试水，到此停止；保留数据和后续建议，尚未执行的收敛及算法实验保持待办。[失败与只读诊断](docs/validation/m6_long_run.md)。
+
+本轮动网格修复与性能重写（2026-10-13）：新增参考几何空间加权调和网格、候选ALE缓存、参考对流张量预计算、耦合轮次初值复用与跨候选LU预条件。公平三重复计时中位25.628→8.823 s（2.905×，每次末态一致）；最终源码全量回归704 passed/2 skipped；新IQN轨迹从零越过旧第825步停止点，接受922步/9.22 s后在第923步因全残差门控（1.708e-7>1e-7，非网格原因）如实失败并保留断点，周期仍INCOMPLETE。证据见 [修复验证](docs/validation/m6_repair_performance.md)。
 
 - [x] 建立经来源核验的 FSI2 配置（cases/fsi2.json，2026-10-12核对官方定义与参考表；仅参数核验完成）。
 - [ ] 两种耦合路线得到稳定且可信的周期响应。
 - [ ] 提取梁尖位移、升阻力、均值、振幅和主频。
 - [ ] 完成独立的网格与时间步长收敛研究。
-- [x] 实现 IQN-ILS 并验证历史管理及退化情况处理（T25 已交付并本地验证；不包含 FSI2 长时周期）。
+- [x] 修正 IQN-ILS 公式、验证历史/退化处理并接入 FSI2 瞬态（小型 FE 多步及真实网格四方法三步一致性通过；不包含长时周期）。
 - [ ] 比较固定松弛、Aitken、IQN-ILS 和整体 Newton。
 - [ ] 支持自动保存数据并生成验证报告和对比图。
 
@@ -144,7 +156,7 @@ T25（2026-10-12）IQN-ILS 控制器已交付：`CouplingOptions.method='iqn'`�
 - [ ] FSI2 的周期解、误差、网格和时间收敛验证通过。
 - [ ] 四种耦合算法的比较配置公平且工作量统计完整。
 - [ ] 本地运行指南、参考来源、参数和结果报告齐全。
-- [x] 已实现功能及回归测试在本地实际执行并通过（M6/T24本轮全量584 passed、2 skipped；短程证据不替代尚未完成的周期验收）。
+- [x] 已实现功能及相关回归测试在本地实际执行并通过（最终修复源码全量 704 passed、2 skipped，见 [修复验证](docs/validation/m6_repair_performance.md)；周期与收敛证据仍待完成，短程证据不替代周期验收）。
 - [ ] 按 Git 上传规范同步最终代码与必要验证摘要。
 
 ## 5. 开发纪律

@@ -1,8 +1,14 @@
 # fsi_ice 开发规格
 
-状态：第一版开发基线。M0–M5 已完成：单场、ALE、界面与事务、固定/Aitken 分区控制器、稳态 FSI1、整体残差与完整耦合 Jacobian、整体 Newton 与伪时间定常推进、同离散配置一致性比较与成本统计均已本地验证。T20 三网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足冻结的 5% 门槛；M5 在 h=0.02 上三种方法（整体/固定/Aitken）逐变量一致（最大差 ≤8.3e-11，最不利裕度比 0.984；[M5 矩阵](docs/validation/m5.md)），23-08 的粗网格字面物理门槛如实记为 failed（网格分辨率限制，最细档物理门槛沿用 T20 证据）。证据见 [T20 验收](docs/validation/t20.md)、[T21](docs/validation/t21.md)/[独立复核](docs/validation/t21_review.md)、[T22](docs/validation/t22.md)、[T23](docs/validation/t23.md)。M6/T24/T25 进行中：FSI2 原始参数、共用BDF/ALE的分区/整体瞬态驱动、全场事务与CLI已实现并通过短程本地验证（[T24](docs/validation/t24.md)）；IQN-ILS 控制器已实现并在 T18 线性有限元同离散上验收（fixed=27 / Aitken=7 / IQN-ILS=11 次评估，三方法逐变量一致，[T25](docs/validation/t25.md)）；稳定周期与基准精度、三网格/三步长收敛及四算法（fixed/Aitken/IQN-ILS/monolithic）公平比较尚未完成，不得标记M6通过。
+当前任务（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控（1.708e-7>1e-7）如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。原8.24秒失败数据保持只读，物理和网格门槛未放宽；M6仍未完成。方案与证据见 [修复计划](docs/development/m6_repair_performance_plan.md) 与 [修复验证](docs/validation/m6_repair_performance.md)。
+
+状态：第一版开发基线。M0–M5 已完成：单场、ALE、界面与事务、固定/Aitken 分区控制器、稳态 FSI1、整体残差与完整耦合 Jacobian、整体 Newton 与伪时间定常推进、同离散配置一致性比较与成本统计均已本地验证。T20 三网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足冻结的 5% 门槛；M5 在 h=0.02 上三种方法（整体/固定/Aitken）逐变量一致（最大差 ≤8.3e-11，最不利裕度比 0.984；[M5 矩阵](docs/validation/m5.md)），23-08 的粗网格字面物理门槛如实记为 failed（网格分辨率限制，最细档物理门槛沿用 T20 证据）。证据见 [T20 验收](docs/validation/t20.md)、[T21](docs/validation/t21.md)/[独立复核](docs/validation/t21_review.md)、[T22](docs/validation/t22.md)、[T23](docs/validation/t23.md)。M6/T24/T25 进行中：FSI2 原始参数、共用BDF/ALE的分区/整体瞬态驱动、全场事务与CLI已实现并通过短程本地验证（[T24](docs/validation/t24.md)）；IQN-ILS 已修正残差割线公式并接入 FSI2 瞬态：T18 更新后6次评估到直接解、小型真实 FE 四方法多步一致、真实 FSI2 三步四方法末态一致（最不利裕度比0.026369），证据见 [本轮记录](docs/validation/m6_iqn_transient.md)；旧[T25](docs/validation/t25.md)保留为更正后的历史证据；完整AcceptedState断点与显式续算已验证（真实网格连续/分段末态逐位一致，648项回归通过/2跳过；[长时记录](docs/validation/m6_long_run.md)）；稳定周期与基准精度、三网格/三步长收敛及四算法（fixed/Aitken/IQN-ILS/monolithic）公平比较尚未完成，不得标记M6通过。2026-10-13 动网格修复与性能重写本轮完成实测：加权网格新轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped；周期与收敛研究仍待完成。[修复验证](docs/validation/m6_repair_performance.md)。
+
+后续研究准备（2026-10-12）：独立只读后处理复用既有周期判据，生成真实图表与JSON/Markdown/周期CSV；相关98项回归通过。三网格/三步长与算法重复计时的候选配置、三档匹配网格已准备，不构成周期、收敛或成本验收；活动求解源码/配置保持冻结。[后处理证据](docs/validation/m6_postprocess.md)。
 
 ## 1. 项目目标
+
+此前执行范围（历史）：用户明确该轮仅为试水，已在8.24 s的既有数据上收尾，停止后续数值推进；实现和失败证据保留，M6完整验收尚未达到。现有数据动画属于只读展示，不新增求解、修改模型或放宽门槛。[试水记录](docs/validation/m6_long_run.md)。
 
 建立一个 Python 流固耦合（FSI）研究平台，自研流体、固体、动网格和耦合算法，以可复现的基准实验比较不同方法的精度、稳定性、收敛性和计算成本。
 
@@ -19,7 +25,7 @@
 | 流体 | 二维不可压缩、牛顿流体；从 Stokes 扩展到稳态及瞬态 Navier–Stokes |
 | 动网格 | ALE，先实现调和位移扩展及网格质量检查 |
 | 界面 | 优先匹配界面，传递位移、速度与载荷，检查运动连续性和离散功一致性 |
-| 分区耦合 | Dirichlet–Neumann、固定松弛、Aitken，后续加入 IQN-ILS |
+| 分区耦合 | Dirichlet–Neumann、固定松弛、Aitken、IQN-ILS |
 | 整体耦合 | 统一残差、完整耦合 Jacobian、Newton 和稀疏线性求解 |
 | 基准 | 单场验证、FSI1 稳态、FSI2 瞬态 |
 | 实验输出 | 配置、监测量、残差历史、耗时、误差及可重复生成的图表 |

@@ -51,6 +51,8 @@
       <li><a href="#concepts">核心概念</a></li>
       <li><a href="#fields">各模块怎么做</a></li>
       <li><a href="#coupling">耦合怎么做</a></li>
+      <li><a href="#fsi2-analysis">时程分析与收敛研究</a></li>
+      <li><a href="#m6-repair">M6修复与提速</a></li>
       <li><a href="#trust">怎么判断算得对</a></li>
       <li><a href="#run">工具链与运行</a></li>
       <li><a href="#record">更新记录</a></li>
@@ -83,13 +85,14 @@
   <h2>现在做到哪一步</h2>
   <div class="note">
     截至 2026-10-12：<strong>M0–M5 已完成并通过本地数值验收</strong>（在 M0–M4 基础上，整体耦合的统一残差、完整耦合 Jacobian、整体 Newton 与伪时间定常推进已交付并验证；h=0.02 上分区与整体在收紧容差后得到一致离散解；其中一项物理门槛在该网格上按字面记为 failed，属网格分辨率限制，详见耦合章节）。
-    M6/T24 已实现 FSI2 瞬态驱动、时间事务与 CLI，并通过小型真实有限元及真实 FSI2 网格三步一致性检查；M6/T25 已实现并验证 IQN-ILS 控制器（在 T18 线性有限元同离散上三种方法逐变量一致）。<strong>FSI2 稳定周期、网格/时间收敛与四算法公平比较尚未验证</strong>；Krylov 预条件实用化及最细网格整体稳态仍为计划。下面用三档标记，避免把计划当成成果。
+    M6/T24 已实现 FSI2 瞬态驱动、时间事务与 CLI，并通过小型真实有限元及真实 FSI2 网格三步一致性检查；M6/T25 后续已修正 IQN 残差割线公式并接入 FSI2 瞬态；小型真实 FE 四方法多步及真实网格四方法三步一致性已验证；完整历史断点续算也已验证；旧IQN长时运行停在8.24秒（第825步候选触发网格体积比门控）。2026-10-13动网格修复与性能重写后，新加权网格IQN从零轨迹越过旧停止点，接受922步/9.22秒，随后第923步因全残差门控失败（1.708e-7>1e-7，非网格原因），断点保留、周期仍INCOMPLETE（<a href="../validation/m6_long_run.md">旧失败记录</a>、<a href="../validation/m6_repair_performance.md">修复验证</a>），<a href="../validation/m6_iqn_transient.md">短程证据</a>。<strong>FSI2 稳定周期、网格/时间收敛与四算法公平比较尚未验证</strong>；Krylov 预条件实用化及最细网格整体稳态仍为计划。下面用三档标记，避免把计划当成成果。
   </div>
   <p>
     <span class="badge b-impl">已实现</span> 代码存在 ·
     <span class="badge b-ver">已验证</span> 有本地运行证据 ·
     <span class="badge b-plan">计划</span> 尚未开始
   </p>
+  <p class="note">上一轮试水在8.24秒的失败数据与断点仍完整保留。2026-10-13的修复与提速已有实测证据：新加权网格轨迹越过旧停止点（接受922步/9.22秒，第923步因残差门控停止）、公平三重复计时中位加速2.905×、最终源码全量回归704项通过；<a href="../validation/m6_mesh_animation.md">两帧动网格动画与数据范围</a>。</p>
   <table>
     <thead><tr><th>内容</th><th>状态</th><th>说明 / 证据</th></tr></thead>
     <tbody>
@@ -136,20 +139,25 @@
         <td>真实网格 Aitken/整体法最不利一致性比0.00722；短程周期结论 INCOMPLETE；<a href="../validation/t24.md">T24记录</a></td>
       </tr>
       <tr>
-        <td>M6/T25 IQN-ILS 控制器：历史管理、系数截断、暂停重启与失败重试</td>
-        <td><span class="badge b-ver">已验证（控制器）</span></td>
-        <td>T18 线性有限元同离散：fixed=27 / Aitken=7 / IQN-ILS=11 次评估，位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10；新增16项测试，全量回归600通过/2跳过；<a href="../development/t25_plan.md">T25计划</a>、<a href="../validation/t25.md">T25验收</a></td>
+        <td>M6 IQN-ILS：公式修正、瞬态接入、历史重启与失败重试</td>
+        <td><span class="badge b-ver">短程已验证</span></td>
+        <td>修正后 T18 IQN 用6次评估到直接解；真实 FSI2 三步 fixed/Aitken/IQN/整体末态一致（最不利裕度比0.026369），IQN每步9次评估、7次拟牛顿更新、0次重启；相关211项测试通过。<a href="../development/m6_iqn_transient_plan.md">本轮计划</a>、<a href="../validation/m6_iqn_transient.md">本轮记录</a>；完整周期仍未验证</td>
       </tr>
       <tr>
-        <td>M6 稳定周期与网格/时间收敛、四算法（fixed/Aitken/IQN-ILS/monolithic）比较与图表</td>
+        <td>M6 只读断点分析、真实图表及研究配置准备</td>
+        <td><span class="badge b-ver">工具已验证</span></td>
+        <td>相关98项测试通过，真实前缀保持INCOMPLETE/FAIL；17份未启动配置和三档匹配网格准备；<a href="../validation/m6_postprocess.md">后处理记录</a></td>
+      </tr>
+      <tr>
+        <td>M6 稳定周期与网格/时间收敛、四算法（fixed/Aitken/IQN-ILS/monolithic）的公平成本比较</td>
         <td><span class="badge b-plan">计划</span></td>
         <td>IQN-ILS 控制器已可用（见上行），但长时 FSI2 周期、独立网格/时间研究与公平成本表尚未执行</td>
       </tr>
     </tbody>
   </table>
   <p class="muted">
-    M5 冻结状态的全量回归为 <strong>557 项通过、2 项跳过</strong>（记录见 <a href="../../gola.md">gola.md</a> M5 状态；
-    本次文档维护只做文档检查，<strong>未重跑全量回归</strong>）。
+    最近求解器全量回归为 <strong>651 项通过、2 项跳过</strong>（<a href="../validation/m6_long_run.md">绝对残差修复记录</a>）；
+    本轮后处理/研究准备的相关回归为98项通过，<strong>未重跑包含新增脚本的全量回归</strong>（<a href="../validation/m6_postprocess.md">证据</a>）。
     测试通过只表示预设检查通过；没有证据的功能不在此写"已验证"。
   </p>
 </section>
@@ -348,16 +356,16 @@
       并限制在 [0.05, 1] 内；分母退化时保留上一步系数并记录原因。</li>
     <li><strong>IQN-ILS 拟牛顿加速（T25）</strong>：不只盯上一步，而是把过去若干步的界面变化和历史残差变化当作基向量，
       用最小二乘构造逆 Jacobian 的近似更新。设 s(j)=x(j+1)−x(j) 为已走过的步，y(j)=r(j+1)−r(j) 为残差变化，
-      构造 V=[s(j)+ω₀·y(j)]，解最小二乘 V·α=−r(k)，再更新 x(k+1)=x(k)−V·α。
-      初始步（无历史）退为 ω₀·r(k)。当历史列线性相关（数值秩不足）、系数 |α|∞ 超过上限、
-      或 LS 残差相对过大时，清空历史并回退到初始步，记录原因后继续。这样既利用历史加速，又避免病态历史把迭代带偏。</li>
+      构造残差差矩阵 V=[y(j)] 和求解器输出差矩阵 W=[s(j)+y(j)]，按物理尺度 S 解最小二乘 (V/S)·α=−r(k)/S，再更新 x(k+1)=G(x(k))+W·α。
+      其中位移、残差和 S 都具有长度单位，α 无量纲。初始步（无历史）使用 x+ω₀·r(k)。当历史列线性相关（数值秩不足）、系数 |α|∞ 超过上限、
+      或缩放后的相对 LS 残差超过配置上限时，清空历史并回退到初始步，记录原因后继续。FSI2 配置允许相对投影余量1.0，让未完整覆盖的残差方向随历史积累；所有物理门槛保持不变。</li>
   </ul>
   <p class="muted">
-    IQN-ILS 在 T18 线性有限元同离散上与 direct 解比较：固定松弛 27 次、Aitken 7 次、IQN-ILS 11 次评估，
+    修正后的 IQN-ILS 在 T18 线性有限元同离散上与 direct 解比较：固定松弛 27 次、Aitken 7 次、IQN-ILS 6 次评估（旧11次对应旧公式，已更正），
     三种方法的位移/速度/压力/载荷归一化差均 ≤1e-8、组合残差 ≤1e-9、运动误差 ≤1e-9、连续性 ≤1e-10。
-    本页只声称控制器本身在 T18 已验收；<strong>“哪种算法在 FSI2 上更快更稳”尚未验证</strong>，
+    新增反例 G(x)=1−2x 的直接迭代会发散，而 IQN 在三次评估内到解析解；二维非收缩映射与单位变换也通过。真实 FSI2 四方法短程末态一致，但<strong>“哪种算法在稳定周期上更快更稳”尚未验证</strong>，
     需要在同一种瞬态离散下完成四算法公平比较（T26）。证据：
-    <a href="../development/t25_plan.md">T25 计划</a>、<a href="../validation/t25.md">T25 验收</a>、
+    <a href="../development/m6_iqn_transient_plan.md">修正计划</a>、<a href="../validation/m6_iqn_transient.md">修正记录</a>、
     源码 <a href="../../src/fsi_ice/coupling/partitioned.py">coupling/partitioned.py</a>、
     测试 <a href="../../tests/test_iqn.py">test_iqn.py</a>。
   </p>
@@ -584,7 +592,7 @@
     <strong>计划 / 未实现：</strong><span class="badge b-plan">计划</span>
     Krylov 路径的预条件实用化（无预条件 GMRES 不收敛）、最细网格上的整体稳态与跨网格一致性、FSI2 稳定周期与空间/时间收敛、
     四算法（fixed/Aitken/IQN-ILS/monolithic）的公平成本比较。
-    这些内容没有本地验证证据，保持"计划"标记；IQN-ILS<strong>控制器</strong>已在 T25 验收，但其 FSI2 长时与成本比较仍在上述计划内。
+    这些内容没有本地验证证据，保持"计划"标记；IQN-ILS 已修正公式并接入物理瞬态，短程一致性见<a href="../validation/m6_iqn_transient.md">本轮记录</a>，其 FSI2 长时与公平成本比较仍在上述计划内。
   </p>
   <p class="muted">
     <strong>证据：</strong><a href="../development/m5_freeze.md">M5 接口冻结与裁决</a>、<a href="../validation/m5.md">M5 验收矩阵</a>、
@@ -603,10 +611,81 @@
     FSI2 把它换成瞬态——流体让梁大幅振动、产生周期性响应，需要测<strong>稳定周期区间</strong>的位移振幅、阻力均值、主频等多项指标。
     <strong>IQN-ILS</strong> 是更聪明的分区加速：把过去若干步的界面残差当作"基向量"，用最小二乘预测下一步松弛量，
     适合历史信息丰富、求解器每步代价不低的瞬态 FSI。T25 已交付并验收 IQN-ILS <strong>控制器</strong>（历史管理、系数截断、暂停重启、失败重试），
-    但尚未把它接入 FSI2 长时周期与成本表。
+    现已修正公式并接入 FSI2 瞬态；四方法真实网格三步末态一致，但完整稳定周期与公平成本表尚未验证。
     M6 的目标是：用同一种瞬态离散，分别让<strong>固定松弛、Aitken、IQN-ILS 和整体 Newton</strong>跑同一道题，
     在物理误差相当的前提下比较它们的<strong>每步时间、组装耗时、迭代次数和失败步数</strong>——
     "正确"的方法之间才有资格谈"哪个更快更稳"。
+  </p>
+  <h3 id="fsi2-checkpoint">算到一半怎样继续（完整历史断点）<span class="badge b-ver">已验证</span></h3>
+  <p>
+    长时实验可能要算很多步。与只保存最后一张“照片”相比，断点还需要保存决定下一步的“过去”：
+    固体、流体和网格的已接受历史，以及压力、界面载荷、时间和监测记录。
+    BDF2下一步要用当前和前一个已接受状态；只有末态的 <code>solution.npz</code> 无法提供这些信息。
+    BDF1需要一层历史，BDF2完成启动后需要两层；时间单位为秒，历史变量单位与上述物理场相同。
+  </p>
+  <p>
+    <strong>程序怎样做：</strong>每个步骤通过全部物理检查并统一接受后，把完整状态写入同目录临时文件，
+    写完才原子替换 <code>checkpoint.npz</code>。恢复必须显式使用 <code>--resume</code>，先核对配置、网格、
+    求解源码摘要、数组校验值、字段形状及历史/监测账本，再加载接受根。只允许延长目标时间，改变其他配置或求解源码会被拒绝。
+    每次恢复仍从新的候选工作区开始，IQN迭代历史不跨步保存；物理时间历史则完整保留。
+  </p>
+  <p>
+    <code>--max-steps</code> 只限制本次调用接受的步数，不改变物理时间步长或目标时间。
+    例如目标20秒、步长0.01秒，每次最多200步，分段结束时仍为 <code>INCOMPLETE</code>；
+    恢复后继续下一步并保留此前监测行。物理求解失败保留最后接受的断点；写文件失败保留上一份已成功落盘的断点，不能把未保存的步冒称可恢复。
+  </p>
+  <p class="muted">
+    <strong>怎样验证：</strong>小型真实FE的BDF1/BDF2及IQN/整体路径中，连续四步与两步后保存/恢复再两步逐数组一致；
+    真实FSI2网格连续4步与2+2分段末态也全部逐位相同，篡改配置/网格/源码/数组/历史或监测记录时拒绝恢复。
+    相关165项测试和全量648项通过、2项既有可选跳过；长时稳定周期尚未完成。
+    <a href="../development/m6_long_run_plan.md">计划</a>、<a href="../validation/m6_long_run.md">验证记录</a>、
+    <a href="../../src/fsi_ice/validation/fsi2_checkpoint.py">断点源码</a>、
+    <a href="../../tests/test_fsi2_checkpoint.py">恢复与故障测试</a>。
+  </p>
+  <h3 id="fsi2-analysis">怎样把时程变成可核查的结果<span class="badge b-ver">工具已验证</span></h3>
+  <p>
+    长时计算还没结束时，也可以看已经算好的部分，就像在长录像里查看已保存的片段。
+    独立后处理脚本一次读取原子保存的断点，核对完整账本与数组，再用与求解器相同的周期算法分析。
+    它不修改求解状态，也不读取正在改写的CSV；分析文件放在另一个目录，记录快照与源码摘要，便于追溯每张图来自哪一段计算。
+  </p>
+  <p>
+    <strong>程序怎样做：</strong>输出位移、升阻力、网格质量和残差的真实时程；周期足够时，再画梁尖最后三个完整周期的窗口。
+    周期统计同时列出频率（Hz）、半峰峰振幅（位移为m，力为N/m）、时间加权均值和变化量。
+    梁尖周期窗口内的阻力均值用于基准比较，不能把两个峰值的中点当作时间均值。
+    只有目标时长完成、物理门控通过、周期稳定并且参考误差达标，才报告PASS；未稳定的数值标为暂定，失败前缀保留FAIL。
+    已接受步的求解次数和耗时也会列出，但不包含失败尝试、准备和写文件，不能直接据此排列算法快慢。
+  </p>
+  <p>
+    <strong>网格与时间收敛怎样研究：</strong>先固定很小的时间步，逐次加密三套网格；再固定最细网格，逐次缩小三个时间步。
+    这样可以分清“空间分得不够细”和“时间走得太大”各自造成的误差。两组共享最细交点，当前粗网格的20秒基线不是这一整组证据。
+    准备工具已生成5个收敛配置及四算法各3次重复的12个候选成本配置，没有自动启动求解。
+    每组须得到三个完整稳定结果；最细两档的振幅、频率、阻力均值差各不超过参考尺度的2%，细化差值递减，最细结果还须满足原有基准门槛。
+    成本比较等待共同配置通过上述验证，并另测实际单步代价、统一环境和无其他重负载的完整墙钟时间。
+  </p>
+  <p class="muted">
+    <strong>怎样验证、当前状态：</strong>已知正弦信号验证2 Hz、0.0816 m与215.06 N/m的提取，这些是工具测试数据，不是FSI2计算结果。
+    新增26项测试与相关98项回归通过；真实5.60秒前缀生成图表但保持INCOMPLETE，原701步失败前缀保持FAIL。
+    三档网格和匹配拓扑已准备，实际独立收敛和公平算法比较仍属计划。
+    <a href="../../scripts/fsi2_analyze.py">后处理脚本</a>、<a href="../../scripts/m6_prepare_study.py">研究准备脚本</a>、
+    <a href="../../tests/test_m6_postprocess.py">正确性与隔离测试</a>、
+    <a href="../development/m6_postprocess_plan.md">冻结计划</a>、<a href="../validation/m6_postprocess.md">本地证据</a>。
+  </p>
+  <h3 id="fsi2-animation">把已经保存的网格做成动画<span class="badge b-ver">只读展示已验证</span></h3>
+  <p>
+    动画是在看已经保存的计算“照片”，不是重新做一次计算。当前断点只有8.23秒和8.24秒两张完整网格；更早的监测曲线只有几个标量，无法从梁尖位移还原每个内部网格点。
+    程序读取这两层完整流体网格位移和固体位移，加到对应参考坐标上，核对面积比与质量后渲染GIF、MP4和可离线打开的播放页。
+    每张图停留1秒，位移倍率1×；反复播放会跳回8.23秒，这不是一次真实往返振动，也不是完整8秒时程。
+  </p>
+  <p>
+    灰色线是初始参考网格，黄色是当前固体梁；流体单元按当前面积/参考面积着色，红色更接近原0.2压缩门槛，≥1.2共用最高绿色。
+    已接受两帧的最小面积比分别为0.374161与0.260565，最小质量分别0.544801与0.388415；第825步失败候选不在动画中。
+    MP4有48个编码帧，只是在24 fps下重复显示两张状态图，不能称为48个求解时刻。单位仍为米，面积比与质量无单位。
+  </p>
+  <p class="muted">
+    <strong>怎样验证：</strong>8项读取/导出测试通过；恢复坐标逐值核对，几何指标与原监测一致，输入文件摘要不变；GIF两帧各1000 ms，MP4为1680×960、2秒。
+    动画仅展示真实保存状态，完整周期、收敛与算法比较没有因此完成。本轮不再推进数值实验。
+    <a href="../../scripts/fsi2_mesh_animation.py">渲染脚本</a>、<a href="../../tests/test_mesh_animation.py">读取与导出测试</a>、
+    <a href="../validation/m6_mesh_animation.md">实测与数据范围</a>。
   </p>
   <h3 id="fsi2-transient">让流体和梁一起随时间变化（T24）<span class="badge b-ver">短程已验证</span></h3>
   <p>
@@ -640,6 +719,15 @@ BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
     之后比较梁尖y振幅0.0816 m、频率1.93 Hz和阻力均值215.06 N/m，允许误差分别为10%、5%、10%。
     波形不足或仍增长时保持INCOMPLETE。分析算法的测试采用合成波形，明确不是FSI2计算结果。
   </p>
+  <p>
+    <strong>单场内部收敛的绝对兜底（本轮修复）：</strong>流体与固体的Newton求解原先只按"残差相对自身方程量级足够小"停止。
+    振幅增大后方程量级（含惯性历史项）随之变大，同一个相对判据会留下更大的绝对残差：20秒实验曾在 t≈7.02 s 处
+    触发全残差 1.019e-7 &gt; 1e-7 的门控失败，分块诊断显示超限全部来自流体动量块。现在瞬态驱动在原有相对判据之外，
+    再要求单场自由残差的原始二范数不超过"门控值乘以该块物理尺度"的10%——目标由入口的 <code>residual_max</code> 推出，
+    不新增配置字段；二范数不超目标必然保证门控检查的最大分量不超限。固体实测地板低于该目标，停止行为不变；
+    流体仅在需要时多做一次Newton。独立调用单场求解器时该绝对目标为可选参数，默认行为不变。
+    故障、诊断与修复证据见<a href="../validation/m6_long_run.md">本轮记录</a>。
+  </p>
   <p class="muted">
     <strong>证据与入口：</strong><a href="../development/m6_t24_plan.md">T24冻结计划</a>、
     <a href="../validation/t24.md">本地验证记录</a>、<a href="../../cases/fsi2.json">FSI2配置与来源</a>；
@@ -649,11 +737,25 @@ BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
     完整周期、三网格/三步长收敛和四算法比较仍待验证；当前整体组装成本限制长时实验。
   </p>
   <p>
+    <strong>长时实验的当前限制：</strong>修复前的IQN运行已接受8.24秒（824步），下一步某个梁尖上方的流体三角形被挤得过小。
+    体积比在二维中就是当前面积与参考面积之比，等于 det(J当前)/det(J参考)，没有单位；原安全门槛要求至少剩20%。
+    第825步候选只有19.5848%，程序因此拒绝并停止，保留前824步完整历史。2026-10-13的加权网格新轨迹已不在该处失败：第824–826步最小面积比保持在0.72–0.79，越过8.24秒继续到9.22秒（922步），随后在第923步因全残差门控（1.708e-7 > 1e-7）而非网格面积比失败；接受断点保留，门槛未放宽。只读外推只作诊断，不能用降低安全门槛冒充完成。
+    <a href="../validation/m6_long_run.md">旧失败与几何诊断</a>、<a href="../validation/m6_repair_performance.md">修复验证与第923步失败</a>。
+  </p>
+  <p>
     <strong>证据：</strong><a href="../development/t18_plan.md">T18 计划</a>、<a href="../validation/t18.md">T18 记录</a>、
     <a href="../validation/t19.md">T19 Aitken 验收</a>、<a href="../development/fsi1_plan.md">FSI1 计划</a>、<a href="../validation/t20.md">T20 验收</a>；
     代码 <a href="../../src/fsi_ice/coupling/partitioned.py">coupling/partitioned.py</a>；
     测试 <a href="../../tests/test_partitioned.py">test_partitioned.py</a>、<a href="../../tests/test_aitken.py">test_aitken.py</a>、<a href="../../tests/test_fsi1.py">test_fsi1.py</a>。
   </p>
+</section>
+
+<section id="m6-repair">
+  <h2>M6 修复与提速（已实现，局部已验证）</h2>
+  <p>本轮已实现新的动网格方案与性能改进并完成实测：旧8.24秒失败数据完整保留；新方案的20步启动和四方法三步一致性已验证；新加权网格轨迹越过旧停止点（接受922步/9.22秒）后在第923步因全残差门控失败，公平重复计时中位加速2.905×。</p>
+  <p>程序现在按候选几何缓存同一步中不变的历史载荷与输运矩阵，预先计算参考单元积分，并用本步上一轮流体解作为下一轮的初值。旧LU分解只作当前线性方程的预条件，程序仍检查当前方程的真实残差；缓存随几何和历史变化失效，失败时丢弃临时状态。</p>
+  <p>动网格现在可在参考几何上使用随界面距离变化的正权重：距离界面越近，网格越不容易局部挤压。它是计算网格的虚拟系数，不改变流体或固体材料；分区与整体方法使用同一网格刚度。用旧断点真实梁位移只读重算，第824步最小面积比由0.261改善为0.795；新加权网格轨迹随后实际越过8.24秒（第824–826步最小面积比0.72–0.79），止于第923步的残差门控，与网格挤压无关。</p>
+  <p>面积比0.2、质量0.1及残差、守恒门槛保持不变。新方案四算法在真实网格三步逐变量一致；20步IQN轨迹已接受，均仍为周期INCOMPLETE。能否越过旧失败区间以及周期精度和完整M6验收仍需实际证据。见<a href="../development/m6_repair_performance_plan.md">实施计划</a>、<a href="../validation/m6_repair_performance.md">验证记录</a>、<a href="../../src/fsi_ice/ale/harmonic.py">网格源码</a>和<a href="../../tests/test_m6_repair.py">测试</a>。</p>
 </section>
 
 <section id="trust">
@@ -666,7 +768,7 @@ BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
     <li><strong>守恒与对偶</strong>：质量收支、几何守恒（GCL）、界面虚功/功率、总力与总矩、作用力反作用力。</li>
     <li><strong>与公开参考比较</strong>：CSM/CFD/FSI1 数值对照 Turek–Hron 基准与 FeatFlow 官方结果，使用核验过的来源与单位。</li>
     <li><strong>重复性与失败注入</strong>：重复运行逐位一致；人为制造失败验证回滚与重试等价于冷启动；失败不保留旧 PASS。</li>
-    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行相关测试；M6/T24本轮全量584项通过、2项跳过（M5冻结状态为557项通过、2项跳过）。仅文档维护不必重跑数值测试。</li>
+    <li><strong>完整回归</strong>：每次功能改动后在项目 <code>.venv</code> 本地运行相关测试；修复单场绝对残差判据后全量651项通过、2项跳过（198.22 s；<a href="../validation/m6_long_run.md">记录</a>）。仅文档维护不必重跑数值测试。</li>
   </ul>
   <p>
     每项功能的验证日期、命令、环境、参数、预期标准、实测结果与结论记录在
@@ -682,16 +784,16 @@ BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
     <a href="../../requirements.txt">requirements.txt</a>；重建说明见 <a href="../environment.md">环境记录</a>）。
     常用命令（在项目根目录）：
   </p>
-  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（当前600通过、2跳过）
+  <pre>.venv/bin/python -m fsi_ice test                             # 全部回归（最近全量基线651通过、2跳过）
 .venv/bin/python -m fsi_ice poisson    --config cases/poisson_sine.json --output results/poisson
 .venv/bin/python -m fsi_ice single-fields --config cases/single_fields.json --output results/single_fields
 .venv/bin/python -m fsi_ice partitioned-check --config cases/partitioned_check.json --output results/t18/check
 .venv/bin/python -m fsi_ice partitioned-check --config cases/iqn_check.json --output results/t25/iqn
 .venv/bin/python -m fsi_ice fsi1       --config cases/fsi1.json --output results/t20/fsi1
-.venv/bin/python -m fsi_ice fsi2       --config cases/fsi2.json --output results/m6/fsi2 --mesh-size 0.03 --end-time 0.03</pre>
+.venv/bin/python -m fsi_ice fsi2       --config cases/fsi2.json --output results/m6/fsi2 --mesh-size 0.03 --end-time 0.03 --method iqn</pre>
   <p class="muted">
     <code>partitioned-check</code> 可用 <code>--method fixed|aitken|iqn</code> 覆盖配置中的算法选择；
-    <code>cases/iqn_check.json</code> 为 IQN-ILS 的冻结配置。
+    <code>fsi2 --method fixed|aitken|iqn|monolithic</code> 使用同一物理配置；<code>--resume checkpoint.npz</code>显式恢复全历史，<code>--max-steps</code>控制分段长度；IQN每步历史冷启动，失败重试不复用历史。<code>cases/iqn_check.json</code> 为修正后的线性 FE IQN 配置。
   </p>
   <p>
     <code>csm3</code>、<code>cfd3</code> 为动态基准（三套网格、三个步长，耗时较长），支持
@@ -707,10 +809,46 @@ BDF2: v(k) = [1.5 d(k) − 2 d(k−1) + 0.5 d(k−2)] / Δt</pre>
 </section>
 
 <section id="record">
+  <p>2026-10-13：完成M6动网格修复与性能重写本轮验证：加权网格新IQN轨迹越过旧第825步停止点（接受922步/9.22秒），第923步因全残差门控（1.708e-7>1e-7，非网格原因）如实失败；公平三重复计时中位由25.628 s降至8.823 s（2.905×）；最终源码全量回归704 passed/2 skipped；旧失败数据只读未变。完整稳定周期、网格/时间独立性与四算法公平成本待办，M6未完成。<a href="../validation/m6_repair_performance.md">本轮验证记录</a>。</p>
   <h2>更新记录</h2>
   <table>
     <thead><tr><th>日期</th><th>章节</th><th>变化</th><th>证据</th></tr></thead>
     <tbody>
+      <tr>
+        <td>2026-10-13</td><td>M6修复与提速</td>
+        <td>第11次维护：解释加权调和网格、候选ALE缓存、参考对流张量预计算、耦合轮次初值复用与跨候选LU预条件；记录新轨迹越过旧停止点及第923步残差门控失败（网格机理已修复，未放宽任何门槛）。</td>
+        <td><a href="../validation/m6_repair_performance.md">修复验证</a>：922步/9.22秒接受断点、四方法短程一致、公平计时2.905×、105项局部与704项全量回归；周期INCOMPLETE。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>试水收尾、已有网格动画</td>
+        <td>第10次维护：按用户要求停止数值推进；解释只读两层网格历史、坐标还原、慢放与循环、参考网格和颜色截断、实际状态帧与视频编码帧的区别。没有新求解或补造历史。</td>
+        <td><a href="../validation/m6_mesh_animation.md">动画证据</a>：8项测试、823/824步真实两帧、输入摘要不变及GIF/MP4检查；M6完整验收保持未完成。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>FSI2长时状态、动网格限制</td>
+        <td>第9次维护：记录修复后IQN在8.24秒停止、第825步候选体积比不足；解释面积比、失败候选与已接受断点、只读外推的局限。没有更改求解源码或验收门槛。</td>
+        <td><a href="../validation/m6_long_run.md">实际失败与诊断</a>：824步断点保留，自动分析已完成；总体FAIL、周期INCOMPLETE，20秒及M6验收未完成。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>FSI2后处理与独立收敛研究</td>
+        <td>第8次维护：解释只读断点分析、真实图表与暂定周期统计、失败前缀、时均值和诊断计时；说明三网格/三步长的单变量研究、共享交点和公平成本前置条件。源码与活动运行配置冻结。</td>
+        <td><a href="../validation/m6_postprocess.md">本轮证据</a>：26项新增测试、98项相关回归、真实前缀图表、17份未启动配置和三档匹配网格准备；周期与M6完整验收尚未完成。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>FSI2瞬态、运行入口</td>
+        <td>第7次维护：解释单场Newton相对判据与绝对门控不匹配导致的 t≈7.02 s 门控失败（超限全部来自流体动量块），以及新增的绝对残差兜底：0.1×residual_max×块物理尺度，二范数界蕴含门控的最大分量界，不新增配置字段、单场默认行为不变。</td>
+        <td><a href="../validation/m6_long_run.md">本轮记录</a>：失败与分块/求解器诊断、修复后同一步接受（残差1.392e-9）、全量651项通过/2跳过、真实h=0.03四方法三步一致性与T24相同。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>完整历史续算、M6状态、运行入口</td>
+        <td>第6次维护：解释末态与断点的区别、BDF历史、接受后原子写入、显式恢复的配置/网格/源码校验、分段INCOMPLETE及失败后的可恢复范围。</td>
+        <td><a href="../validation/m6_long_run.md">本轮记录</a>：真实网格连续/分段结果逐位相同；相关165项、全量648项通过/2跳过。长时周期与本页检查状态见记录。</td>
+      </tr>
+      <tr>
+        <td>2026-10-12</td><td>IQN公式、M6状态、运行入口</td>
+        <td>第5次维护：更正旧IQN最小二乘矩阵与更新公式，说明残差割线、物理尺度与投影余量；接入FSI2瞬态、每步冷启动、失败回滚与重试。保留旧记录供追溯，完整周期与公平成本仍待验证。</td>
+        <td><a href="../validation/m6_iqn_transient.md">本轮证据</a>：非收缩解析反例、单位不变性、小型FE多步与真实四方法三步一致性；相关211项与全量621项通过、2项跳过。启动探索及本页结构/布局检查见该记录。</td>
+      </tr>
       <tr>
         <td>2026-10-12</td>
         <td>M6状态、耦合、更新记录</td>

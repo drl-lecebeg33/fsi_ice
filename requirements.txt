@@ -14,3 +14,4 @@ pytest==9.1.1
 python-dateutil==2.9.0.post0
 scipy==1.18.1
 six==1.17.0
+tzdata==2026.5; sys_platform == "win32"

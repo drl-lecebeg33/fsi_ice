@@ -3,3 +3,5 @@ numpy
 scipy
 matplotlib
 pytest
+# Windows has no system tz database, so zoneinfo timestamps need the tzdata package there.
+tzdata; sys_platform == "win32"

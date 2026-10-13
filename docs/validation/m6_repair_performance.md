@@ -23,13 +23,14 @@
 - 墙钟（含各自进程启动）：基线 22.898/25.628/27.522 s（中位 25.628），优化 13.527/8.823/8.772 s（中位 8.823）；中位加速比 **2.905×**；优化最慢一次 13.527 s 仍低于基线最快一次 22.898 s，三次重复均无回退。
 - 求解内计时：基线 20.133/22.221/24.475 s，优化 11.122/6.960/6.881 s；耦合迭代 28 vs 29 次/短程，Newton 迭代 95 vs 77。
 - 线性求解工作量（逐接受步监测账本）：优化版每次重复为3次流体LU预条件分解与69次GMRES迭代；旧源码快照不记录 `fluid_factorizations`/`fluid_krylov_iterations` 两列，其 `linear_solves` 为95（优化版77）。
-- 每次重复的基线/优化末态一致性比较全部 passed（`comparison_0/1/2.json`）；源码摘要基线 `7ab6acf…`、优化 `1e7df09…` 与当前工作区 `source_digest()` 一致（2026-10-13 复核相等）。
+- 每次重复的基线/优化末态一致性比较全部 passed（`comparison_0/1/2.json`）；源码摘要基线 `7ab6acf…`、优化 `1e7df09…` 与当时的当前工作区 `source_digest()` 一致（2026-10-13 复核相等；随后仅合并了注释提交，见下）。
 - 范围：仅短程吞吐证据，不代表长时或20 s目标；正式T26公平成本研究仍需相同物理精度与重复计时证据。
 
 ## 最终局部与全量回归（2026-10-13）
 
 - 局部：`tests/test_flow_linear_solver.py tests/test_m6_repair.py tests/test_ale_fluid.py tests/test_fsi2.py` 共105项；修复前为1 failed/104 passed（`reused_lu_tests.log`，断言过严已按实测可复用扰动改正），重跑 **105 passed**（125.33 s，日志 `results/m6/repair/lu_cache_tests_final.log`）。
-- 全量：最终源码（`source_digest()=1e7df09…`，与性能计时的优化快照一致）下 `pytest tests` **704 passed, 2 skipped** / 222.44 s；两个跳过为既有可选FSI1整体冒烟与T23历史产物检查，706项全部收集（日志 `results/m6/repair/full_tests_final.log`）。
+- 全量：合并前最终源码（`source_digest()=1e7df09…`，与性能计时的优化快照一致）下 `pytest tests` **704 passed, 2 skipped** / 222.44 s；两个跳过为既有可选FSI1整体冒烟与T23历史产物检查，706项全部收集（日志 `results/m6/repair/full_tests_final.log`）。
+- 注释合并复核（2026-10-13）：合并 origin/main 的中文注释提交 `2436737` 后，8 个重叠文件按“注释 + 本轮改动”解决（旧 IQN 公式相关注释随修正后的公式更新）；52 个被改源文件的去 docstring AST 与合并前完全一致（仅注释/文档字符串变化）；合并树上全量回归重跑 **704 passed, 2 skipped / 205.00 s**，合并后源码摘要 `74330ed…`。性能计时与断点证据仍对应合并前源码 `1e7df09…`（行为等价）。
 - 旧失败数据只读复核：`results/m6/repair/old_evidence_hashes.json` 的六项 SHA256 与当前文件全部一致，8.24秒失败轨迹/断点未被改动。
 - 原理文档：HTML标签闭合、唯一id与166条本地链接检查通过；headless Chromium 1280×900与390×844截图实看版式正常，且两个视口量化 clientWidth=scrollWidth=1265/375、无横向溢出；证据 `results/m6/repair/layout/`。
 

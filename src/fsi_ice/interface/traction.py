@@ -20,6 +20,18 @@ geometry factor by hand -- ``J_x^-1`` and the P2 physical gradients, the fluid
 tangent/normal/length, the solid ``F_s``/``J_s`` and the Nanson ratio
 ``j_Gamma`` -- and never uses black-box differencing, so it can be used as the
 T21 interface block without an extra solve.
+
+本模块从流体 Cauchy 应力迹装配界面载荷。``assemble_interface_load`` 在当前界面
+积分点上用共享的 ``boundary_cauchy_stress`` 计算流体应力 ``t_s = -sigma_f n_f``，
+再对流体 P2 迹基函数积分；当前路径用 ``l w_q`` 积分 ``t_s``，等价参照路径用
+``L0 w_q`` 积分 ``T_s0 = j_Gamma t_s``，厚度在两条路径中都只乘一次。积分得到的
+流体 P2 迹对偶节点力 ``g_f_gamma`` 经 ``f_s_gamma = H.T g_f_gamma`` 映射到固体，
+不再二次积分或缩放。关键约定：载荷正向为流体作用在固体上（``t_s = -sigma_f n_f``），
+``n_f`` 为流体外法向。``pullback_traction`` 做当前-参照面积换算检查
+``T_s0 = j_Gamma t_s``。``interface_load_jvp`` 是 ``assemble_interface_load`` 关于
+流体速度/压力、流体网格位移与固体位移的解析方向导数（JVP）：逐一手写微分几何
+因子（``J_x^-1`` 与 P2 物理梯度、流体切线/法向/长度、固体 ``F_s``/``J_s``、Nanson
+比 ``j_Gamma``），不使用黑箱差分，可直接作为 T21 界面块而无需额外求解。
 """
 
 from collections.abc import Mapping
@@ -65,6 +77,14 @@ class InterfaceLoad:
     ``_quadrature`` variants the direct quadrature sums about
     ``moment_origin``; all totals include the thickness once.  All arrays are
     read-only.
+
+    单个候选几何与流体状态下的已积分界面载荷。``t_s`` 为当前面力（流体作用在
+    固体上，Pa），``T_s0`` 为参照面积面力 ``j_Gamma t_s``（``j_Gamma`` 为 Nanson
+    面积比 ``J_s ||F_s^-T N_s||``，``length_ratios`` 另存独立的当前长度比 ``l/L0``）。
+    ``g_f_gamma`` 为已积分的流体 P2 迹对偶节点力（含厚度，形状 ``(2*n_fG,)``，单位
+    力）；``f_s_gamma`` 为 ``H.T g_f_gamma``，位于压缩固体界面迹。``total_force``/
+    ``total_moment`` 为固体侧总量，``_fluid`` 变体为流体迹求和、``_quadrature``
+    变体为绕 ``moment_origin`` 的直接积分求和；所有总量都只含一次厚度。数组只读。
     """
 
     topology_id: str
@@ -99,6 +119,11 @@ def pullback_traction(geometry, traction, *, path="nanson"):
     surface ratio ``J_s ||F_s^-T N_s||`` and ``path="length"`` the current
     length ratio ``l/L0``.  The result is the traction per unit reference
     area, still expressed in current x/y components.
+
+    将当前面积面力样本换算为参照面积面力。返回 ``j_Gamma * traction``，其中
+    ``path="nanson"`` 使用 Nanson 面积比 ``J_s ||F_s^-T N_s||``、``path="length"``
+    使用当前长度比 ``l/L0``。输入 ``traction`` 形状须与 ``geometry.x_q`` 一致
+    （Pa），结果为单位参照面积的面力，分量仍在当前 x/y 方向表达；返回只读数组。
     """
     if not isinstance(geometry, InterfaceGeometry):
         raise TypeError("geometry must be an InterfaceGeometry.")
@@ -127,6 +152,14 @@ def assemble_interface_load(topology, geometry, operators, solution, *, thicknes
     ``T_s0 = j_Gamma t_s`` with ``L0 w_q`` for the conversion check.  The
     thickness is multiplied once and the integrated ``f_s_gamma`` is ready to
     be scattered into the solid ``external`` vector without further factors.
+
+    为一个候选流体状态装配界面载荷。``operators`` 必须在 ``geometry.current_mesh``
+    上装配，``solution`` 为该几何下的流体状态（提供 ``velocity``/``pressure``）。
+    ``path="current"`` 用 ``l w_q`` 积分 ``t_s``；``path="reference"`` 用 ``L0 w_q``
+    积分 ``T_s0 = j_Gamma t_s`` 以作换算检查。``thickness`` 为界面厚度（长度量纲，
+    须有限正数），只乘一次；积分得到的 ``f_s_gamma`` 可直接散布进固体 ``external``
+    向量而无需再乘因子。``moment_origin`` 为力矩参考点。返回只读的
+    :class:`InterfaceLoad`。
     """
     if not isinstance(topology, InterfaceTopology):
         raise TypeError("topology must be an InterfaceTopology.")
@@ -146,6 +179,7 @@ def assemble_interface_load(topology, geometry, operators, solution, *, thicknes
         raise TypeError("solution must provide velocity and pressure arrays.")
 
     stress = boundary_cauchy_stress(operators, solution, geometry.fluid_owner, geometry.reference_points_fluid)
+    # 界面面力 t_s = -sigma_f n_f：流体应力在固体上的作用（载荷正向指向固体）。
     t_s = -np.einsum("eqij,ej->eqi", stress, geometry.n_f)
     T_s0 = pullback_traction(geometry, t_s)
     if path == "current":
@@ -170,13 +204,16 @@ def assemble_interface_load(topology, geometry, operators, solution, *, thicknes
         raise ValueError(f"Fluid trace node {error.args[0]!r} is not part of the topology; "
                          "the operators do not match the interface topology.") from None
     g_f_gamma = np.zeros(2*topology.n_fluid_interface_nodes)
+    # 按 P2 局部棱列展开到全局交错自由度 (2*node, 2*node+1) 上累加。
     np.add.at(g_f_gamma, (2*rows[..., None]+np.array([0, 1])).reshape(-1), loads.reshape(-1))
+    # 对偶载荷映射到压缩固体界面迹：f_s = H.T g_f（不再次积分/缩放）。
     f_s_gamma = np.asarray(topology.H.T @ g_f_gamma)
 
     force_solid = f_s_gamma.reshape(-1, 2).sum(axis=0)
     force_fluid = g_f_gamma.reshape(-1, 2).sum(axis=0)
     quad_weight = geometry.weights[None, :]*measure[:, None]
     force_quadrature = thickness*np.einsum("eq,eqi->i", quad_weight, field)
+    # 力矩 = sum r x F（二维叉积 r_x F_y - r_y F_x）；r 相对 moment_origin。
     x_s = geometry.vertex_coordinates-origin
     moment_solid = float(np.sum(x_s[:, 0]*f_s_gamma.reshape(-1, 2)[:, 1]
                                 - x_s[:, 1]*f_s_gamma.reshape(-1, 2)[:, 0]))
@@ -214,6 +251,14 @@ class InterfaceLoadDerivative:
     the current lengths or whether the Nanson ratio of the reference path is
     differentiated.  All arrays are read-only and no input or history is
     modified.
+
+    一个已装配界面载荷的方向导数。``delta_t_s`` 为面力样本导数 ``d t_s``（Pa），
+    ``delta_g_f_gamma`` 为已积分流体 P2 迹对偶节点力（含厚度）的导数（N），
+    ``delta_f_s_gamma`` 为其经 ``H.T`` 映射到压缩固体迹的像（N）。``delta_total_force``
+    为固体侧总力导数（N），``delta_total_moment`` 为绕原点 ``(0, 0)`` 的固体侧总力矩
+    导数（N*m）；二者在同路径下与 ``InterfaceLoad.total_force``/``total_moment``
+    对应。``path`` 决定测度导数来自当前长度还是参照路径 Nanson 比。数组只读，不修改
+    输入或历史。
     """
 
     topology_id: str
@@ -241,7 +286,13 @@ def _direction_array(delta, key, shape):
 
 
 def _direction_arrays(topology, operators, delta):
-    """Validate the direction mapping and fill missing keys with zeros."""
+    """Validate the direction mapping and fill missing keys with zeros.
+
+    校验方向映射 ``delta`` 并补齐缺失键为零。``delta`` 的键只能取自
+    ``velocity``/``pressure``/``mesh_displacement``/``solid_displacement``，形状分别
+    为 ``(n_P2, 2)``/``(n_P1,)``/``(n_fluid_P1, 2)``/``(n_solid, 2)``；至少一个键、
+    且至少一个方向非零。返回统一包含四个键的字典，缺失键填零数组。
+    """
     if not isinstance(delta, Mapping):
         raise TypeError("delta must be a mapping with keys among "
                         "'velocity', 'pressure', 'mesh_displacement', 'solid_displacement'.")
@@ -263,7 +314,13 @@ def _direction_arrays(topology, operators, delta):
 
 
 def _nanson_direction(F_s, J_s, N_s, delta_F_s):
-    """Directional derivative of the Nanson surface ratio ``J_s ||F_s^-T N_s||``."""
+    """Directional derivative of the Nanson surface ratio ``J_s ||F_s^-T N_s||``.
+
+    计算 Nanson 面积比 ``J_s ||F_s^-T N_s||`` 的方向导数。输入 ``F_s``/``J_s``
+    为固体变形梯度与雅可比、``N_s`` 为参照外法向、``delta_F_s`` 为变形梯度的方向
+    导数；返回逐棱的 ``d j_Gamma``（无量纲）。利用 ``d(F^-T N) = -F^-T (dF)^T F^-T N``
+    与 ``dJ = cof(F):dF`` 解析求导。
+    """
     transpose = np.transpose(F_s, (0, 2, 1))
     transformed = np.linalg.solve(transpose, np.asarray(N_s)[:, :, None])[:, :, 0]
     norm = np.linalg.norm(transformed, axis=1)
@@ -296,6 +353,17 @@ def interface_load_jvp(topology, geometry, operators, solution, delta, *, thickn
     never enters the current path).  ``operators`` must be assembled on
     ``geometry.current_mesh`` and ``solution`` is the fluid state there.  No
     input array, geometry, mesh or history is modified.
+
+    ``assemble_interface_load`` 的解析方向导数。``delta`` 为映射，其键是
+    ``"velocity"`` ``(n_P2, 2)``、``"pressure"`` ``(n_P1,)``、
+    ``"mesh_displacement"`` ``(n_fluid_P1, 2)``、``"solid_displacement"``
+    ``(n_solid, 2)`` 的子集；至少一个方向非零，允许混合方向。每个已实现的块都解析
+    微分：流体应力按 ``delta sigma = -delta p I + mu (delta grad u + delta grad u^T)``
+    （与 ``boundary_cauchy_stress`` 相同的 P2 物理梯度基）；网格方向经 ``J_x^-1``、
+    P2 物理梯度与流体切线/法向；固体方向经 ``F_s``/``J_s``/Nanson ``j_Gamma`` 以及
+    当前路径的固体棱长（参照路径保持 ``L0`` 并微分 ``T_s0 = j_Gamma t_s``，故当前
+    路径不含 ``T_s0``）。``operators`` 必须在 ``geometry.current_mesh`` 上装配，
+    ``solution`` 为其流体状态。不修改任何输入数组、几何、网格或历史。
     """
     if not isinstance(topology, InterfaceTopology):
         raise TypeError("topology must be an InterfaceTopology.")
@@ -328,20 +396,25 @@ def interface_load_jvp(topology, geometry, operators, solution, delta, *, thickn
     reference_points = geometry.reference_points_fluid
     reference_gradients = p2_reference_gradients(reference_points.reshape(-1, 2)).reshape(
         n_edges, n_quadrature, 6, 2)
+    # 每个单元的网格雅可比逆 J_x^-1，用于后续物理梯度及其方向导数。
     inverse_jacobians = np.linalg.inv(mesh.jacobians)
 
     # Current traction through the shared kernel, exactly as the assembly.
+    # 中文补充：t_s = -sigma_f n_f，与装配使用同一核函数与被测状态，保证基线一致。
     stress = boundary_cauchy_stress(operators, solution, owners, reference_points)
     n_f = geometry.n_f
     t_s = -np.einsum("eqij,ej->eqi", stress, n_f)
 
     # Fluid state and mesh derivatives of the physical velocity gradients.
+    # 中文补充：物理梯度 grad u = grad_ref * J_x^-1，其导数分两来源——流体速度方向
+    # 与网格位移方向（后者经 d(J_x^-1)）。
     local_velocity = np.asarray(velocity, dtype=float)[space_cells[owners]]
     physical = np.einsum("eqai,eij->eqaj", reference_gradients, inverse_jacobians[owners])
     gradient_delta = np.einsum("eai,eqaj->eqij", delta_velocity[space_cells[owners]], physical)
     if np.any(delta_mesh):
         vertices = delta_mesh[cells]
         delta_jacobian = np.stack((vertices[:, 1]-vertices[:, 0], vertices[:, 2]-vertices[:, 0]), axis=2)
+        # d(J_x^-1) = -J_x^-1 dJ_x J_x^-1。
         delta_inverse = -np.einsum("eij,ejk,ekl->eil", inverse_jacobians, delta_jacobian, inverse_jacobians)
         gradient_delta += np.einsum("eai,eqaj->eqij", local_velocity,
                                     np.einsum("eqai,eij->eqaj", reference_gradients,
@@ -352,18 +425,22 @@ def interface_load_jvp(topology, geometry, operators, solution, delta, *, thickn
             - np.asarray(mesh.points, dtype=float)[fluid_edges[:, 0]]
         delta_tangent = delta_mesh[fluid_edges[:, 1]] - delta_mesh[fluid_edges[:, 0]]
         delta_fluid_length = np.einsum("ei,ei->e", fluid_tangent, delta_tangent)/geometry.fluid_lengths
+        # d n_f = (d t_perp - n_f * d|t|)/|t|，即切向旋转量扣除法向长度变化分量。
         delta_n_f = (np.column_stack((delta_tangent[:, 1], -delta_tangent[:, 0]))
                      - n_f*delta_fluid_length[:, None])/geometry.fluid_lengths[:, None]
     else:
         delta_n_f = np.zeros_like(n_f)
     shape = shape_values(reference_points.reshape(-1, 2)).reshape(n_edges, n_quadrature, 3)
     delta_pressure_values = np.einsum("eqa,ea->eq", shape, delta_pressure[cells[owners]])
+    # d sigma = mu (d grad u + (d grad u)^T) - d p I。
     delta_stress = (operators.viscosity*(gradient_delta + gradient_delta.transpose(0, 1, 3, 2))
                     - delta_pressure_values[:, :, None, None]*np.eye(2))
+    # d t_s = -(d sigma) n_f - sigma (d n_f)，含应力方向与法向方向两部分贡献。
     delta_t_s = (-np.einsum("eqij,ej->eqi", delta_stress, n_f)
                  - np.einsum("eqij,ej->eqi", stress, delta_n_f))
 
     # Solid direction: F_s/J_s/j_Gamma and the current-path edge lengths.
+    # 中文补充：固体方向导数经 dF_s = (grad u 方向) 插值、dJ_s/dj_Gamma 与当前棱长 d l。
     if np.any(delta_solid):
         solid_cells = np.asarray(topology.solid_mesh.cells, dtype=np.int64)
         solid_gradients = physical_gradients(topology.solid_mesh)
@@ -388,6 +465,7 @@ def interface_load_jvp(topology, geometry, operators, solution, delta, *, thickn
         delta_field = delta_t_s
         delta_measure = delta_lengths
     else:
+        # 参照路径：场为 T_s0 = j_Gamma t_s，测度固定为 L0 故 d_measure = 0。
         measure = geometry.reference_lengths
         field = geometry.j_Gamma_nanson[:, None, None]*t_s
         delta_field = delta_j_Gamma[:, None, None]*t_s + geometry.j_Gamma_nanson[:, None, None]*delta_t_s

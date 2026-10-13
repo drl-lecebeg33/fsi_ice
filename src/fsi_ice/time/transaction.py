@@ -26,6 +26,17 @@ Design follows ``docs/development/validation_plan.md`` section 3 and
 :class:`StateCoordinator` owns the live root reference, grants the single
 write permission at ``begin`` and serialises ``publish``/``load``/``restore``
 and output bookkeeping on one lock.
+
+中文说明：本模块实现“全场单步事务”。``AcceptedState`` 是全场唯一被接受的根状态：
+内部数组均为独立深复制，公开读取返回只读副本，已接受历史永不原地修改。
+``StepTransaction`` 以 ``begin -> evaluate -> validate -> prepare -> publish|abort``
+在私有工作区推进单步（三个全新的 ``BDFHistory`` 加候选数组，与根状态不共享可变存储）。
+任何失败都是终态的：本次尝试作废，在根状态之外追加失败审计记录，必须用全新的
+owner/``attempt_id`` 重开尝试，使旧 context 或快照无法重放（防 ABA）。``prepare`` 执行
+全部可能失败的操作（含三次私有 ``BDFHistory.accept`` 与冻结监测行），``publish`` 仅替换
+一次活动根引用；发布后的 IO 失败记为 ``output_pending``，按接受 epoch 幂等重写，绝不
+回滚已提交的物理步。``StateCoordinator`` 持有活动根引用，在 ``begin`` 授予唯一写权限，
+并在单把锁上串行化 ``publish``/``load``/``restore`` 与输出记账。
 """
 
 from __future__ import annotations
@@ -60,18 +71,30 @@ _CONFIRM_STAGES = ("geometry", "solid", "fluid", "interface")
 # Globally monotonic attempt serial: every transaction gets a fresh id, so
 # geometry revisions ``(attempt_id, candidate)`` are unique process-wide and
 # never reused even by a retried terminal attempt.
+# 中文：进程级单调递增的尝试序号，保证每次尝试的 id 唯一；几何版本
+# ``(attempt_id, candidate)`` 因此全局唯一，重试的终态尝试也不会复用旧 id（防 ABA）。
 _ATTEMPT_SERIAL = itertools.count(1)
 
 
 class TransactionError(RuntimeError):
-    """Lifecycle violation: wrong stage order or reuse of a terminal attempt."""
+    """Lifecycle violation: wrong stage order or reuse of a terminal attempt.
+
+    中文：事务生命周期违规，例如阶段顺序错误，或复用一个已终态（committed/aborted）的尝试。
+    """
 
 
 class StepConflict(TransactionError):
-    """Publish conflict: the live accepted root no longer matches this base."""
+    """Publish conflict: the live accepted root no longer matches this base.
+
+    中文：发布冲突，说明活动根状态已不再等于本事务的 base（身份或 epoch 已变），拒绝提交。
+    """
 
 
 def _as_int(value, name, *, minimum=0):
+    """Validate and normalise an integer, rejecting bools as integers.
+
+    中文：校验并规范化整数参数，显式排除 bool，并要求不小于 ``minimum``。
+    """
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise ValueError(f"{name} must be an integer, got {value!r}.")
     value = int(value)
@@ -81,6 +104,10 @@ def _as_int(value, name, *, minimum=0):
 
 
 def _as_float(value, name, *, positive=False, nonnegative=False):
+    """Validate and normalise a finite real number with optional sign bounds.
+
+    中文：校验并规范化有限实数，可按需要求为正或非负；bool 视为非法输入。
+    """
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a real number, got {value!r}.")
     number = float(value)
@@ -94,7 +121,11 @@ def _as_float(value, name, *, positive=False, nonnegative=False):
 
 
 def _own_array(values, shape, name):
-    """Deep-copy ``values`` into an independent read-only finite float array."""
+    """Deep-copy ``values`` into an independent read-only finite float array.
+
+    中文：把 ``values`` 深复制为独立、只读且有限的浮点数组（可选校验形状）；返回副本与
+    入参不共享存储，因此外部改动无法影响内部已接受状态。
+    """
     try:
         array = np.array(values, dtype=float, copy=True)
     except (TypeError, ValueError) as error:
@@ -108,13 +139,21 @@ def _own_array(values, shape, name):
 
 
 def _expose_array(values):
-    """Fresh read-only copy handed to callers so mutations cannot leak back."""
+    """Fresh read-only copy handed to callers so mutations cannot leak back.
+
+    中文：交给调用方的是全新的只读副本，即便调用方重新开启写权限也无法回改内部缓冲。
+    """
     copy = np.array(values, dtype=float, copy=True)
     copy.setflags(write=False)
     return copy
 
 
 def _own_mapping(values, name):
+    """Deep-copy a mapping of arrays into a read-only mapping of read-only arrays.
+
+    中文：把映射中每个值深复制为只读、至少一维且有限的数组，并用只读代理包住整个映射；
+    ``None`` 视为空映射。用于接口量/预报量等按名存放的数组集合。
+    """
     if values is None:
         return MappingProxyType({})
     if not isinstance(values, Mapping):
@@ -134,11 +173,19 @@ def _own_mapping(values, name):
 
 
 def _expose_mapping(values):
+    """Read-only mapping of fresh read-only array copies for external readers.
+
+    中文：返回由全新只读数组副本构成的只读映射，供外部安全读取。
+    """
     return MappingProxyType({key: _expose_array(value) for key, value in values.items()})
 
 
 def _freeze_row(value, path="row"):
-    """Deep-freeze one serializable monitoring value."""
+    """Deep-freeze one serializable monitoring value.
+
+    中文：把一行监测数据递归深冻结：映射转只读代理、list/tuple 转 tuple、ndarray 转只读
+    副本、numpy 标量转 Python 标量；遇到不可序列化的类型抛 ``ValueError``。
+    """
     if isinstance(value, Mapping):
         return MappingProxyType({str(key): _freeze_row(item, f"{path}[{key!r}]")
                                  for key, item in value.items()})
@@ -154,6 +201,11 @@ def _freeze_row(value, path="row"):
 
 
 def _copy_row(value):
+    """Deep-copy a frozen monitoring row back into plain mutable containers.
+
+    中文：把已冻结的监测行递归复制为普通容器（映射转 dict、只读数组转只读副本），
+    便于交给序列化器而不暴露内部存储。
+    """
     if isinstance(value, Mapping):
         return {key: _copy_row(item) for key, item in value.items()}
     if isinstance(value, tuple):
@@ -164,6 +216,10 @@ def _copy_row(value):
 
 
 def _freeze_diagnostics(value):
+    """Freeze a failure's diagnostics into a read-only mapping.
+
+    中文：把失败诊断信息冻结为只读映射；非映射的裸值统一包进 ``{"detail": ...}``。
+    """
     if value is None:
         return MappingProxyType({})
     if not isinstance(value, Mapping):
@@ -173,6 +229,10 @@ def _freeze_diagnostics(value):
 
 
 def _shape(value, name):
+    """Normalise an extent sequence into a tuple of nonnegative integers.
+
+    中文：把形状序列规范为整数元组，拒绝负数维度，用于接口/预报字段的形状声明。
+    """
     try:
         shape = tuple(int(item) for item in value)
     except (TypeError, ValueError):
@@ -183,13 +243,21 @@ def _shape(value, name):
 
 
 def _rebuild_history(states, dt, order, time, generation):
-    """Fresh ``BDFHistory`` with copied layers and the preserved generation."""
+    """Fresh ``BDFHistory`` with copied layers and the preserved generation.
+
+    中文：用拷贝出的历史层与原有 generation 重建一个全新的 ``BDFHistory``；先按最新层
+    构造，再用 ``restore`` 覆写完整快照，使副本与源历史互不影响。
+    """
     history = BDFHistory(states[-1], dt, order=order, time=time)
     history.restore((time, generation, tuple(states)))
     return history
 
 
 def _probe_generation(history):
+    """Read the current generation of a history (snapshot index 1).
+
+    中文：读取某历史当前的 generation（``snapshot`` 的第 2 个元素），用于代次一致性校验。
+    """
     return history.snapshot()[1]
 
 
@@ -198,6 +266,11 @@ class AcceptedState:
 
     All constructor inputs are deep-copied into independent read-only arrays.
     Public properties return fresh read-only copies, never the owned buffers.
+
+    中文：全场唯一的、不可变的已接受根状态，只有 ``publish`` 会整体替换它。构造参数一律
+    深复制为独立只读数组；对外属性返回全新只读副本而非内部缓冲。字段包含全局时间、
+    固定 dt/order、已接受步号/epoch、固体 d/v 历史、流体 u/p 及其速度历史、网格位移 a、
+    当前坐标 x 与速度 w 的历史、接口运动/载荷、预报量与成功的监测行。
     """
 
     __slots__ = ("time", "dt", "order", "step", "epoch", "_solid_history", "_fluid_history",
@@ -265,7 +338,11 @@ class AcceptedState:
     @classmethod
     def initial(cls, *, solid, velocity, pressure, mesh_displacement, mesh_current, mesh_velocity,
                 time=0.0, dt, order=2, interface=None, predictor=None, monitoring=()):
-        """Accepted root with one history layer per field at ``time``."""
+        """Accepted root with one history layer per field at ``time``.
+
+        中文：构造初始根状态：每个场只有一层历史，step/epoch/generation 均为 0，
+        ``time`` 默认为 0。固体初始状态形状需为 ``(2, n_nodes, 2)``。
+        """
         solid_values = np.asarray(solid, dtype=float)
         if solid_values.ndim != 3 or solid_values.shape[0] != 2:
             raise ValueError("initial solid state must have shape (2, n_nodes, 2).")
@@ -353,7 +430,12 @@ class AcceptedState:
 
 @dataclass(frozen=True, eq=False)
 class StateSnapshot:
-    """Recoverable snapshot; only ``StateCoordinator.snapshot`` produces one."""
+    """Recoverable snapshot; only ``StateCoordinator.snapshot`` produces one.
+
+    中文：可恢复的快照，记录根状态的全部信息与来源凭据（coordinator owner、状态 token、
+    配置指纹、epoch/step/time 等）。只能由 ``StateCoordinator.snapshot`` 生成、并交由其
+    ``restore`` 校验后使用，禁止手工拼装。
+    """
 
     coordinator_owner: object
     state_token: object
@@ -379,7 +461,11 @@ class StateSnapshot:
 
 @dataclass(frozen=True, eq=False)
 class FailureRecord:
-    """One aborted attempt; kept outside the accepted root as a separate audit log."""
+    """One aborted attempt; kept outside the accepted root as a separate audit log.
+
+    中文：一次被作废尝试的审计记录，保存在已接受根状态之外（绝不进入物理状态），记录
+    attempt_id、base_epoch、目标步/时间、失败阶段与字段、原因及诊断信息。
+    """
 
     attempt_id: int
     base_epoch: int
@@ -395,7 +481,10 @@ class FailureRecord:
 
 @dataclass(frozen=True)
 class OutputRecord:
-    """One successful output write for an accepted epoch (at most one per epoch)."""
+    """One successful output write for an accepted epoch (at most one per epoch).
+
+    中文：某个已接受 epoch 的一次成功输出记录，每个 epoch 至多一条，用于幂等判定。
+    """
 
     epoch: int
     step: int
@@ -404,7 +493,11 @@ class OutputRecord:
 
 @dataclass(frozen=True)
 class PendingOutput:
-    """An accepted physical step whose external output write failed and must be replayed."""
+    """An accepted physical step whose external output write failed and must be replayed.
+
+    中文：已接受物理步的外部输出写出失败、等待重放的记录，保存 epoch、step、payload 与
+    失败原因；物理根状态不回滚。
+    """
 
     epoch: int
     step: int
@@ -419,6 +512,10 @@ class StepView:
     Arrays are fresh read-only copies, so a plan callable that re-enables
     writeability and mutates them cannot change the transaction workspace or
     the accepted root.  ``geometry`` is an opaque object owned by the plan.
+
+    中文：交给 plan 可调用对象的只读候选/状态视图。其中数组均为全新只读副本，即使 plan
+    重新开启写权限并修改，也改不到事务工作区或已接受根状态；``geometry`` 是由 plan 自持的
+    不透明对象。``stencil`` 给出本尝试网格位移的 BDF 模板（已合并历史项）。
     """
 
     stage: str
@@ -461,6 +558,13 @@ class StepPlan:
     observation/lifecycle seams invoked inside ``prepare`` (after each private
     accept and before freezing the new root); raising there must leave the live
     root untouched, which the fault-injection suite verifies.
+
+    中文：单个物理步的物理适配器，提供候选构造函数、求解器与生命周期钩子。每个可调用
+    对象接收一个 ``StepView`` 并返回普通数组，事务会深复制并校验返回值，因此 plan 不持有
+    已接受存储。``confirms`` 在对应 evaluate 阶段后立即运行（geometry/solid/fluid/interface），
+    ``checks`` 在最终 ``validate`` 门运行；任何异常都会作废本次尝试，并把条目名记入失败审计。
+    ``hooks`` 是 ``prepare`` 内部的观察/生命周期接缝（每次私有 accept 之后、冻结新根之前），
+    在其中抛错必须保证活动根不变，故障注入测试对此有验证。
     """
 
     build_displacement: Callable[[StepView], np.ndarray]
@@ -518,7 +622,12 @@ class StepPlan:
 
 
 class StepTransaction:
-    """One whole-field step attempt with a private workspace and terminal states."""
+    """One whole-field step attempt with a private workspace and terminal states.
+
+    中文：一次全场单步尝试，拥有私有工作区与终态（open/prepared/committed/aborted）。
+    构造函数从 base 复制三个场的私有 ``BDFHistory`` 与 context，并校验 plan 与已接受接口
+    兼容、三个场历史同步；任意时刻最多只有一个活动写尝试。
+    """
 
     def __init__(self, coordinator, base, plan):
         if not isinstance(base, AcceptedState):
@@ -549,6 +658,7 @@ class StepTransaction:
         self._base_shapes = dict(base.shapes)
         self._base_generations = dict(base.generations)
         self._base_layers = base._layer_counts()
+        # 中文：为每个场建立与根状态不共享存储的私有历史副本，失败回滚不会污染根。
         self._histories = {field: _copy_history(base._history(field)) for field in _FIELDS}
         self._contexts = {field: history.context() for field, history in self._histories.items()}
         self._require_plan_compatible()
@@ -637,6 +747,7 @@ class StepTransaction:
                                  f"shape {tuple(accepted[key].shape)}.")
 
     def _require_synchronized(self):
+        # 中文：校验三个场历史的时间、层数、代次在 begin 期间保持一致，防止半更新状态。
         times = {field: self._histories[field].time for field in _FIELDS}
         if len(set(times.values())) != 1:
             raise ValueError(f"The three field histories are not synchronized: {times}.")
@@ -656,6 +767,10 @@ class StepTransaction:
 
         A context produced by another attempt, another field or another
         transaction is rejected even when generation and time look identical.
+
+        中文：在任何活动写入之前拒绝外来或过期 BDF context。即便 generation 与时间看起来
+        相同，只要 context 来自其它尝试、其它场或其它事务（owner 不同），或 generation 过期、
+        时间/阶数不匹配，都会抛错。返回 ``True`` 表示校验通过。
         """
         if field not in _FIELDS:
             raise ValueError(f"Unknown field {field!r}; expected one of {_FIELDS}.")
@@ -696,6 +811,7 @@ class StepTransaction:
     # ------------------------------------------------------------- stage tools
     def _fail(self, stage, field, reason, diagnostics=None):
         if self._status in ("committed", "aborted"):
+            # 中文：已提交/已作废的尝试是终态，失败不可被覆盖，直接返回既有失败记录。
             return self._failure
         record = FailureRecord(
             attempt_id=self._attempt_id, base_epoch=self._base_epoch,
@@ -704,13 +820,14 @@ class StepTransaction:
             reason=str(reason), diagnostics=_freeze_diagnostics(diagnostics))
         self._failure = record
         self._status = "aborted"
+        # 中文：作废为终态——清空所有私有准备物与候选，确保无法再从本尝试发布。
         self._prepared = None
         self._validated = False
         self._candidates = {}
         self._revision = None
         self._monitor_row = None
         self._coordinator._record_failure(record)
-        self._coordinator._release(self)
+        self._coordinator._release(self)  # 中文：释放写权限，允许用新尝试重来。
         return record
 
     def _reject(self, stage, field, message, diagnostics=None):
@@ -760,7 +877,12 @@ class StepTransaction:
 
     # ---------------------------------------------------------------- stages
     def evaluate_geometry(self, displacement=None):
-        """Stage 1: candidate mesh displacement, geometry, coordinates and velocity."""
+        """Stage 1: candidate mesh displacement, geometry, coordinates and velocity.
+
+        中文：第 1 阶段：生成候选网格位移、几何、当前坐标与网格速度。可选传入
+        ``displacement`` 覆盖 ``plan.build_displacement``；本阶段还会丢弃旧的
+        solid/fluid/interface 候选，并刷新几何版本身份 ``revision``（attempt_id 与计数器组成）。
+        """
         self._require_open()
         if displacement is None:
             displacement = self._call(self._plan.build_displacement, "geometry", "mesh displacement")
@@ -783,7 +905,11 @@ class StepTransaction:
         return self._revision
 
     def evaluate_solid(self):
-        """Stage 2: solid candidate ``(2, n_s, 2)`` from the private solid context."""
+        """Stage 2: solid candidate ``(2, n_s, 2)`` from the private solid context.
+
+        中文：第 2 阶段：用私有固体 context 求解得到形状 ``(2, n_s, 2)`` 的固体候选，
+        并作废旧 interface 候选。返回只读副本。
+        """
         self._require_open()
         if "geometry" not in self._candidates:
             raise TransactionError("evaluate_geometry must complete before evaluate_solid.")
@@ -795,7 +921,11 @@ class StepTransaction:
         return _expose_array(candidate)
 
     def evaluate_fluid(self):
-        """Stage 3: fluid candidate ``(u, p)``; ``u``/``p`` are copied independently."""
+        """Stage 3: fluid candidate ``(u, p)``; ``u``/``p`` are copied independently.
+
+        中文：第 3 阶段：求解流体得到 ``(u, p)`` 候选；``solve_fluid`` 必须返回二元组，u 与 p
+        分别按声明形状深复制为只读数组，并作废旧 interface 候选。返回二者的只读副本。
+        """
         self._require_open()
         if "geometry" not in self._candidates:
             raise TransactionError("evaluate_geometry must complete before evaluate_fluid.")
@@ -811,7 +941,12 @@ class StepTransaction:
         return _expose_array(velocity), _expose_array(pressure)
 
     def evaluate_interface(self):
-        """Stage 4: interface motion/load arrays with declared names and shapes."""
+        """Stage 4: interface motion/load arrays with declared names and shapes.
+
+        中文：第 4 阶段：构造接口运动/载荷数组，字段名与形状必须与 ``plan.interface_shapes``
+        完全一致（多、少、错形都报错）；若无 ``build_interface`` 则记为空映射。要求几何、固体、
+        流体候选均已就绪。
+        """
         self._require_open()
         if self._plan.build_interface is None:
             self._candidates["interface"] = MappingProxyType({})
@@ -849,7 +984,10 @@ class StepTransaction:
         return MappingProxyType({}) if interface is None else _expose_mapping(interface)
 
     def evaluate(self, displacement=None):
-        """Run the four evaluation stages in order with the plan's callables."""
+        """Run the four evaluation stages in order with the plan's callables.
+
+        中文：依次运行四个评估阶段（几何、固体、流体，以及存在时的接口），返回 ``self``。
+        """
         self.evaluate_geometry(displacement)
         self.evaluate_solid()
         self.evaluate_fluid()
@@ -885,6 +1023,9 @@ class StepTransaction:
         Rejects non-finite or wrongly shaped values, runs ``plan.checks`` in
         order, then freezes the successful monitoring row and the predictor
         values for the next root.  A failure discards the whole candidate.
+
+        中文：最终校验门。先检查候选是否齐全，再拒绝非有限值，然后按顺序运行 ``plan.checks``，
+        最后冻结本步监测行与给下一个根的预报量。任一失败都会丢弃整组候选并作废本次尝试。
         """
         self._require_open()
         missing = self._missing_candidates()
@@ -954,6 +1095,10 @@ class StepTransaction:
 
         Every fallible operation happens here; the new root exists only inside
         this attempt until ``publish`` swaps the live reference once.
+
+        中文：在三个私有历史上执行 accept，然后冻结整个下一个根状态。所有可能失败的操作都
+        集中在这里；新根在 ``publish`` 替换活动引用之前只存在于本尝试内部。这里还会校验每个
+        私有历史恰好前进一代且时间等于目标时间，并生成提交给 ``publish`` 的输出 payload。
         """
         self._require_open()
         if not self._validated:
@@ -972,6 +1117,8 @@ class StepTransaction:
         expected_generation = {field: self._base_generations[field] + 1 for field in _FIELDS}
         # BDFHistory always stores two layers after accept; the accepted root keeps
         # one layer for BDF1 and up to two layers for BDF2 (startup then mature).
+        # 中文：私有历史 accept 后总有两层；已接受根在 BDF1 下只留一层，在 BDF2 下按启动
+        # （一层）到成熟（两层）保留层数。预期每个场的代次都恰好自增 1。
         private_layers = min(2, self._base_layers["solid"] + 1)
         root_layers = 1 if self._order == 1 else private_layers
         for field in _FIELDS:
@@ -1014,7 +1161,11 @@ class StepTransaction:
 
     # ---------------------------------------------------------------- publish
     def publish(self):
-        """Replace the live accepted root exactly once and mark the attempt committed."""
+        """Replace the live accepted root exactly once and mark the attempt committed.
+
+        中文：恰好一次地替换活动已接受根并标记本尝试为 committed。若活动根已不再是本事务的
+        base，则抛出 ``StepConflict`` 并作废本次尝试；提交成功后清空私有工作区。
+        """
         self._require("prepared")
         try:
             live = self._coordinator._commit(self)
@@ -1022,6 +1173,7 @@ class StepTransaction:
             self._fail("publish", None, f"publish conflict: {error}")
             raise
         self._status = "committed"
+        # 中文：提交成功后释放私有工作区，不再保留候选与已准备根。
         self._prepared = None
         self._validated = False
         self._candidates = {}
@@ -1030,7 +1182,11 @@ class StepTransaction:
         return live
 
     def abort(self, *, stage="abort", field=None, reason="aborted by caller", diagnostics=None):
-        """Explicit rollback. Committed attempts cannot be aborted."""
+        """Explicit rollback. Committed attempts cannot be aborted.
+
+        中文：显式回滚。已 committed 的尝试不能作废（物理步已成立，抛 ``TransactionError``）；
+        已 aborted 的返回 ``False``；否则记录失败并返回 ``True``。
+        """
         if self._status == "committed":
             raise TransactionError("A committed attempt cannot be aborted; the physical step stands.")
         if self._status == "aborted":
@@ -1040,7 +1196,11 @@ class StepTransaction:
 
     # ----------------------------------------------------------------- output
     def write_output(self, writer):
-        """Idempotent post-publish write; failure is reported as ``output_pending``."""
+        """Idempotent post-publish write; failure is reported as ``output_pending``.
+
+        中文：发布后的幂等写出。无 payload 时返回 ``False``；失败会被记为 ``output_pending``，
+        结果与协调器的输出账本一致。
+        """
         self._require("committed")
         if self._output_payload is None:
             return False
@@ -1070,6 +1230,10 @@ class StateCoordinator:
     and the output ledger are serialized on one lock so readers always observe
     one complete root.  Failure records and output records live next to the
     root, never inside accepted physical state.
+
+    中文：活动已接受根状态的单写者持有者。``begin`` 授予唯一写权限；
+    ``publish``/``load``/``restore`` 与输出账本在同一把锁上串行化，读者始终看到完整一致的根。
+    失败记录与输出记录存放在根之外（作为审计账本），绝不进入已接受的物理状态。
     """
 
     def __init__(self, state, *, config_fingerprint=""):
@@ -1117,7 +1281,11 @@ class StateCoordinator:
 
     # ------------------------------------------------------------- lifecycle
     def begin(self, *, plan, dt=None, order=None):
-        """Start the single open attempt from the live accepted root."""
+        """Start the single open attempt from the live accepted root.
+
+        中文：从活动已接受根开启唯一一个 open 尝试。若已有活动尝试则拒绝；可选的 dt/order
+        必须与根上固定的值一致（本设计固定步长且固定阶数），否则报错。
+        """
         if not isinstance(plan, StepPlan):
             raise TypeError("plan must be a StepPlan.")
         with self._lock:
@@ -1149,10 +1317,16 @@ class StateCoordinator:
                 self._active = None
 
     def _commit(self, transaction):
+        """Swap the live root under lock after re-checking the write permission and base.
+
+        中文：持锁提交：再次确认本尝试仍持有写权限，且活动根仍是它的 base（身份与 epoch 都
+        一致），否则抛 ``StepConflict``（防 ABA/陈旧发布）；随后一次性替换活动根并释放写权限。
+        """
         with self._lock:
             if self._active is not transaction:
                 raise StepConflict("This attempt no longer holds the coordinator write permission.")
             live = self._state
+            # 中文：身份与 epoch 双重校验；不一致说明期间根已变（防 ABA/陈旧发布）。
             if live is not transaction._base or live.epoch != transaction.base_epoch:
                 raise StepConflict(
                     f"The live accepted epoch {live.epoch} no longer matches base epoch "
@@ -1166,7 +1340,11 @@ class StateCoordinator:
             return prepared
 
     def load(self, state):
-        """Adopt an externally recovered root (same fixed dt/order/shapes)."""
+        """Adopt an externally recovered root (same fixed dt/order/shapes).
+
+        中文：接纳一个外部恢复的根状态，要求 dt、order 与各场形状都与当前协调器一致，
+        并登记其 epoch/step。返回被接纳的根。
+        """
         if not isinstance(state, AcceptedState):
             raise TypeError("load() accepts an AcceptedState.")
         with self._lock:
@@ -1181,7 +1359,11 @@ class StateCoordinator:
             return state
 
     def snapshot(self):
-        """Capture the current live root; only this coordinator may restore it."""
+        """Capture the current live root; only this coordinator may restore it.
+
+        中文：捕获当前活动根生成 ``StateSnapshot``，并写入本协调器的 owner 标识、根身份 token
+        与配置指纹；只有同一协调器才能用其 ``restore`` 恢复。
+        """
         with self._lock:
             state = self._state
             return StateSnapshot(
@@ -1200,6 +1382,10 @@ class StateCoordinator:
         Foreign owner, stale root/epoch, wrong config, mismatched dt/order/layers
         or malformed arrays are rejected before any live write.  The restored
         root receives fresh history identities, so old contexts are rejected.
+
+        中文：用 ``snapshot`` 的全新副本替换活动根（恢复重放）。任何活动写入之前先拒绝外来
+        owner、陈旧根/epoch、配置不符、dt/order/层数不匹配或畸形数组。恢复出的根拥有全新的
+        历史身份，因此此前取出的旧 context 会被拒绝，避免 ABA 重放。
         """
         if not isinstance(snapshot, StateSnapshot):
             raise TypeError("restore() accepts only a StateSnapshot produced by snapshot(); "
@@ -1209,6 +1395,7 @@ class StateCoordinator:
             if snapshot.coordinator_owner is not self._owner:
                 raise ValueError("Foreign snapshot: it was produced by another coordinator.")
             if snapshot.state_token is not live._identity:
+                # 中文：快照必须对应当前活动根身份；陈旧快照（根已前进或被替换）直接拒绝。
                 raise ValueError("Stale snapshot: the live root advanced or was replaced after it was taken.")
             if snapshot.config_fingerprint != self._config_fingerprint:
                 raise ValueError("Snapshot config fingerprint does not match this coordinator.")
@@ -1234,7 +1421,11 @@ class StateCoordinator:
 
     # ----------------------------------------------------------------- output
     def output_state(self, epoch):
-        """``written``/``pending``/``unwritten`` for an accepted epoch."""
+        """``written``/``pending``/``unwritten`` for an accepted epoch.
+
+        中文：返回某个已接受 epoch 的输出状态：已成功写出为 ``written``，等待重放为
+        ``pending``，尚未写为 ``unwritten``；未被本协调器接受的 epoch 会报错。
+        """
         epoch = _as_int(epoch, "epoch", minimum=1)
         with self._lock:
             if epoch in self._outputs:
@@ -1252,6 +1443,10 @@ class StateCoordinator:
         (the accepted epoch is then kept with ``output_pending``) or when the
         epoch already has its single success record.  The physical root is
         never rolled back and nothing is re-solved.
+
+        中文：幂等地写出某个已接受 epoch 的输出。写入成功返回 ``True``；writer 抛错（该已接受
+        epoch 随即记为 ``output_pending``）或该 epoch 已有唯一成功记录时返回 ``False``。
+        物理根绝不回滚，也不会重新求解。
         """
         epoch = _as_int(epoch, "epoch", minimum=1)
         if not callable(writer):
@@ -1260,6 +1455,7 @@ class StateCoordinator:
             if epoch not in self._accepted_steps or epoch > self._state.epoch:
                 raise ValueError(f"Epoch {epoch} has not been accepted by this coordinator.")
             if epoch in self._outputs:
+                # 中文：该 epoch 已有唯一成功记录，幂等返回 False，不重复写出。
                 return False
             if payload is None:
                 if self._pending is None or self._pending.epoch != epoch:
@@ -1270,6 +1466,7 @@ class StateCoordinator:
                 writer(payload)
             except Exception as error:
                 reason = f"{type(error).__name__}: {error}"
+                # 中文：仅标记为待重放并保留已接受根，绝不回滚物理步。
                 self._pending = PendingOutput(epoch, step, payload, reason)
                 return False
             self._outputs[epoch] = OutputRecord(epoch, step, payload)
@@ -1278,7 +1475,11 @@ class StateCoordinator:
             return True
 
     def flush_output(self, writer):
-        """Retry the pending output write; no-op when nothing is pending."""
+        """Retry the pending output write; no-op when nothing is pending.
+
+        中文：重试待重放的输出写出；没有待重放项时直接返回 ``False``。持锁读取待写项后在锁外
+        调用 ``write_output``，避免写 IO 时长时间持锁。
+        """
         with self._lock:
             pending = self._pending
             if pending is None:

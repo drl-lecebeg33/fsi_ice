@@ -1,4 +1,11 @@
-"""Project entry point; failures return a nonzero exit status."""
+"""Project entry point; failures return a nonzero exit status.
+
+本模块是 ``fsi-ice`` 命令行入口，定义并分派各子命令：``poisson``（解析解收敛）、
+``partitioned-check``（分区耦合校验）、``fsi1``/``fsi2``（Turek–Hron 基准）、
+``solid``/``fluid``/``single-fields``/``csm3``/``cfd3``（单场验证与基准）以及
+``test``（运行开发测试）。退出码约定：0 表示 PASS，1 表示 FAIL，2 表示参数或运行
+错误（ValueError/TypeError/OSError/RuntimeError），3 表示 fsi2 的 INCOMPLETE。
+"""
 
 import argparse
 from pathlib import Path
@@ -7,6 +14,11 @@ import sys
 
 
 def main(argv=None):
+    """解析命令行并分派到对应子命令，返回进程退出码。
+
+    中文：``argv`` 为参数列表（默认取 ``sys.argv``）。成功返回 0，基准未通过返回 1，
+    捕获到参数或运行错误时打印到 stderr 并返回 2，fsi2 未完成返回 3。
+    """
     parser = argparse.ArgumentParser(prog="fsi-ice", description="FSI research foundation and validation")
     subparsers = parser.add_subparsers(dest="command", required=True)
     poisson = subparsers.add_parser("poisson", help="Run analytical Poisson mesh convergence")
@@ -28,6 +40,7 @@ def main(argv=None):
     fsi2.add_argument("--mesh-size", type=float)
     fsi2.add_argument("--resume", type=Path, help="Explicit full-history checkpoint; solution.npz is insufficient")
     fsi2.add_argument("--max-steps", type=int, help="Accept at most this many steps in the current chunk")
+    # 中文：以下单场类子命令共用 --config/--output/--no-plot 参数。
     for command in ("solid", "fluid", "single-fields", "csm3", "cfd3"):
         validation = subparsers.add_parser(command, help="Run single-field verification and benchmarks")
         validation.add_argument("--config", type=Path, required=True)
@@ -48,6 +61,7 @@ def main(argv=None):
                 controls["max_steps"] = args.max_steps
             report = run_fsi2_cli(args.config, args.output, **controls)
             print(f"{report['status']}: report saved to {args.output.resolve() / 'report.json'}")
+            # 中文：fsi2 还需区分 INCOMPLETE（未达终时）与失败，故映射为 0/1/3。
             return {"PASS": 0, "FAIL": 1, "INCOMPLETE": 3}[report["status"]]
         if args.command == "fsi1":
             from fsi_ice.validation.fsi1 import run_fsi1_cli
@@ -93,6 +107,7 @@ def main(argv=None):
                                       {"scope": "linear/nonlinear solid, Stokes/Navier-Stokes, manufactured BDF convergence, CSM1/2 and CFD1/2"})
             print(f"{report['status']}: report saved to {args.output.resolve() / 'report.json'}")
             return 0 if report["status"] == "PASS" else 1
+        # 中文：其余情况即 ``poisson`` 子命令，走解析解网格收敛流程。
         from fsi_ice.validation.poisson import PoissonConfig, run_convergence
 
         config = PoissonConfig.from_file(args.config) if args.config else PoissonConfig()

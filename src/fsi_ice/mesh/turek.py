@@ -1,4 +1,10 @@
-"""Turek-Hron reference geometries; Gmsh is only a triangulation generator."""
+"""Turek-Hron reference geometries; Gmsh is only a triangulation generator.
+
+本模块复现 Turek–Hron FSI1/FSI2 基准的参考几何：几何定义、物理边界标签与共享节点
+约定均由本模块给出，Gmsh 仅作为三角剖分生成器。提供 Gmsh MSH2 读取与流/固子网格
+拆分、FSI1 几何脚本生成、CSM 变形网格与 CFD 障碍绕流网格。约定网格均为平面 z=0、
+单元为一阶三角形。
+"""
 
 from dataclasses import dataclass
 
@@ -18,6 +24,11 @@ class FSIMeshPair:
     The global node arrays map local P1 vertices back to the original Gmsh
     identifiers.  They provide an independent check that the two wet traces
     really share reference vertices, instead of merely having close coordinates.
+
+    中文：保存从同一 Gmsh 文件拆出的流体/固体子网格对。``fluid``/``solid`` 为两个
+    :class:`~fsi_ice.mesh.triangular.TriMesh`；``fluid_global_nodes``/
+    ``solid_global_nodes`` 把各自局部顶点映射回原始 Gmsh 节点编号，用于独立校验
+    两个湿边界确实共享同一批参考顶点（而非仅坐标接近）。
     """
 
     fluid: TriMesh
@@ -26,6 +37,7 @@ class FSIMeshPair:
     solid_global_nodes: np.ndarray
 
     def __post_init__(self):
+        # 中文：全局节点编号必须唯一且覆盖各自子网格的全部节点。
         for name, mesh in (("fluid_global_nodes", self.fluid),
                            ("solid_global_nodes", self.solid)):
             nodes = np.array(getattr(self, name), dtype=np.int64, copy=True)
@@ -35,6 +47,7 @@ class FSIMeshPair:
             object.__setattr__(self, name, nodes)
 
 
+# 中文：FSI1 基准中流体域与固体域各自必需的物理边界标签（须在 Gmsh 文件中出现）。
 FSI1_BOUNDARIES = {
     "fluid": ("walls", "outlet", "inlet", "cylinder-rigid-wall", "fluid-interface"),
     "solid": ("solid-clamp", "solid-interface"),
@@ -42,6 +55,12 @@ FSI1_BOUNDARIES = {
 
 
 def _gmsh2_sections(path):
+    """解析 ASCII Gmsh MSH 2.2 文件。
+
+    中文：返回 (points, elements)。``points`` 为节点编号到 (x,y) 的映射；
+    ``elements`` 为 (kind, physical_name, nodes) 列表，仅保留点/线/三角形元素，
+    并要求网格为平面 z=0。
+    """
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     if "$MeshFormat" not in lines or lines[lines.index("$MeshFormat")+1].split()[:2] != ["2.2", "0"]:
         raise ValueError("Require ASCII Gmsh MSH version 2.2.")
@@ -77,6 +96,7 @@ def _gmsh2_sections(path):
             raise ValueError(f"Unsupported Gmsh element type {kind}.")
         if len(nodes) != expected or any(node not in points for node in nodes):
             raise ValueError("Invalid Gmsh element connectivity.")
+        # 中文：Gmsh 端点(element type 15)记录与 P1 域/边界导入无关，直接跳过。
         if kind == 15:
             continue  # Gmsh endpoint records are irrelevant to the P1 domain/boundary import.
         physical = names.get(({1: 1, 2: 2}[kind], fields[3]))
@@ -87,6 +107,11 @@ def _gmsh2_sections(path):
 
 
 def _submesh(points, triangle_rows, boundary_rows):
+    """由共享 Gmsh 数据抽取一个子网格。
+
+    中文：对给定三角形与边界边重新编号局部节点，按行列式符号统一为逆时针（CCW），
+    返回 (TriMesh, global_nodes)，其中 global_nodes 为局部到全局节点编号的映射。
+    """
     global_nodes = np.unique(np.asarray(triangle_rows, dtype=np.int64))
     mapping = {int(node): local for local, node in enumerate(global_nodes)}
     coordinates = np.array([points[int(node)] for node in global_nodes])
@@ -94,6 +119,7 @@ def _submesh(points, triangle_rows, boundary_rows):
     corners = coordinates[cells]
     first, second = corners[:, 1]-corners[:, 0], corners[:, 2]-corners[:, 0]
     clockwise = first[:, 0]*second[:, 1]-first[:, 1]*second[:, 0] < 0
+    # 中文：顺时针单元交换后两个顶点，恢复逆时针定向。
     cells[clockwise] = cells[clockwise][:, [0, 2, 1]]
     boundaries = {}
     for tag, rows in boundary_rows.items():
@@ -105,7 +131,11 @@ def _submesh(points, triangle_rows, boundary_rows):
 
 
 def read_fsi_gmsh2(path):
-    """Read one MSH2 file containing the named FSI1 fluid and solid surfaces."""
+    """Read one MSH2 file containing the named FSI1 fluid and solid surfaces.
+
+    中文：读取包含 FSI1 流体/固体命名物理表面的单个 MSH2 文件，校验两域必需的
+    边界标签后，拆分为共享节点的 :class:`FSIMeshPair` 返回。
+    """
     points, elements = _gmsh2_sections(path)
     triangles = {"fluid": [], "solid": []}
     edges = {}
@@ -131,10 +161,15 @@ def read_fsi_gmsh2(path):
 
 
 def fsi1_geometry(size):
-    """Return the tagged shared-geometry Gmsh script for the FSI1 benchmark."""
+    """Return the tagged shared-geometry Gmsh script for the FSI1 benchmark.
+
+    中文：返回 FSI1 基准的 Gmsh 脚本字符串，包含外流域、圆柱障碍、柔性梁及全部
+    物理标签。``size`` 为全局网格尺寸 lc，须为有限正数。
+    """
     if isinstance(size, bool) or not isinstance(size, (int, float, np.integer, np.floating)) \
             or not np.isfinite(size) or size <= 0:
         raise ValueError("Mesh size must be finite and positive.")
+    # 中文：梁与圆柱连接点的横坐标，由半径 0.05、竖直偏置 0.01 的几何关系确定。
     attachment = 0.2+np.sqrt(0.05**2-0.01**2)
     return f'''Mesh.MshFileVersion = 2.2;
 Mesh.Algorithm = 6;
@@ -167,7 +202,12 @@ Field[2].DistMin = 0.03; Field[2].DistMax = 0.25; Background Field = 2;
 
 
 def fsi1_mesh(size, output):
-    """Generate and import a matching FSI1 fluid/solid mesh pair."""
+    """Generate and import a matching FSI1 fluid/solid mesh pair.
+
+    中文：调用系统 ``gmsh`` 生成 FSI1 几何并读回配对的流体/固体网格；在 ``output``
+    下写入 fsi1.geo、fsi1.msh 与 gmsh.log，返回 :class:`FSIMeshPair`。缺少 gmsh
+    或生成失败时抛出 ``RuntimeError``。
+    """
     executable = shutil.which("gmsh")
     if executable is None:
         raise RuntimeError("FSI1 benchmark meshing requires the Gmsh executable.")
@@ -185,17 +225,29 @@ def fsi1_mesh(size, output):
 
 
 def csm_mesh(nx, ny):
+    """生成 CSM 基准的弯曲梁参考网格。
+
+    中文：以 0.35×0.02 的矩形网格为基础，将竖直坐标平移 +0.19 后按圆柱面几何把
+    x 坐标映射到区间 [attachment, 0.6]，得到贴合圆柱、向右延伸的梁参考构型；
+    单元与边界标签沿用矩形网格。
+    """
     base = rectangle_mesh(nx, ny, width=0.35, height=0.02)
     points = base.points.copy()
     y = points[:, 1]+0.19
+    # 中文：给定竖向坐标 y 时圆柱表面（圆心 (0.2,0.2)、半径 0.05）的右支横坐标。
     attachment = 0.2+np.sqrt(0.05**2-(y-0.2)**2)
+    # 中文：把归一化横坐标线性映射到 [attachment, 0.6] 区间。
     points[:, 0] = attachment+(points[:, 0]/0.35)*(0.6-attachment)
     points[:, 1] = y
     return TriMesh(points, base.cells, base.boundaries)
 
 
 def read_gmsh2(path):
-    """Read ASCII MSH2: physical line tags and first-order triangular cells."""
+    """Read ASCII MSH2: physical line tags and first-order triangular cells.
+
+    中文：读取仅含物理线标签与一阶三角形单元的 ASCII MSH2 文件，返回
+    :class:`TriMesh`；导入时会先统一单元定向为逆时针。
+    """
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     if "$MeshFormat" not in lines or lines[lines.index("$MeshFormat")+1].split()[:2] != ["2.2", "0"]:
         raise ValueError("Require ASCII Gmsh MSH version 2.2.")
@@ -227,6 +279,7 @@ def read_gmsh2(path):
     if cells.size == 0:
         raise ValueError("Gmsh file contains no triangles.")
     # Import policy: normalize clockwise cells explicitly before TriMesh validation.
+    # 中文：导入策略——交给 TriMesh 校验前，显式把顺时针单元改为逆时针。
     corners = points[cells]
     a, b = corners[:, 1]-corners[:, 0], corners[:, 2]-corners[:, 0]
     clockwise = a[:, 0]*b[:, 1]-a[:, 1]*b[:, 0] < 0
@@ -235,6 +288,12 @@ def read_gmsh2(path):
 
 
 def cfd_mesh(size, output):
+    """生成并读入 CFD 障碍绕流网格。
+
+    中文：调用系统 ``gmsh`` 生成含圆柱障碍的外流场网格，``size`` 为全局网格尺寸
+    lc。在 ``output`` 下写入 mesh.geo、mesh.msh 与 gmsh.log，返回
+    :class:`TriMesh`；缺少 gmsh 或生成失败时抛出 ``RuntimeError``。
+    """
     if not np.isfinite(size) or size <= 0:
         raise ValueError("Mesh size must be finite and positive.")
     executable = shutil.which("gmsh")
@@ -244,6 +303,7 @@ def cfd_mesh(size, output):
     output.mkdir(parents=True, exist_ok=True)
     attach = 0.2+np.sqrt(0.05**2-0.01**2)
     # Four circle arcs plus the fixed flag define one closed obstacle boundary.
+    # 中文：四条圆弧加固定尾迹构成一条封闭的圆柱障碍边界。
     geo = f'''Mesh.MshFileVersion = 2.2;
 Mesh.Algorithm = 6;
 lc = {size:.17g};

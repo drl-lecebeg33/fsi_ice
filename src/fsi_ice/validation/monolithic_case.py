@@ -25,6 +25,18 @@ The comparison tolerance columns and the scale values are the values frozen by
 the T23 task dispatch (A0); they are not spec gates and must never be relaxed
 to make a comparison pass.  Residual definitions differ between methods (M-1)
 and are recorded separately, never compared numerically.
+
+中文说明：本模块负责 M5/T23 的两件事。其一，在**同一套离散**（相同网格、拓扑与
+ALE 几何）上驱动整体（monolithic）稳态 FSI1 求解：以显式初值（流体静止但带入口
+Dirichlet 数据、固体未变形、参考网格、零界面载荷、``pressure_pin=None``）调用
+``march_to_steady`` 逼近 BDF 不动点，当标度后的 BDF 时间项低于给定容差时即认为达到
+稳态；整体与分区共享物理离散与残差实现，因此可直接做逐变量一致性对比与成本统计。
+其二，提供 T23 的一致性/成本“纯函数”辅助：按冻结的逐变量判据
+（``max|a_M-a_P| <= rtol*max(||a_M||inf,||a_P||inf) + atol``，``rtol=1e-8``、
+``atol=1e-10*S*``）与冻结的 FSI1 尺度（``L*=0.41 m, U*=0.2 m/s, P*=40 Pa,
+F*=14.29426 N/m``）生成对比表与成本聚合。关键约定：上述容差列与尺度是任务派发冻结
+值（A0），不是规范门槛，绝不允许为让对比通过而放宽；不同方法的残差定义不同（M-1），
+只分别记录、绝不跨方法数值比较。
 """
 
 from __future__ import annotations
@@ -61,38 +73,52 @@ from fsi_ice.validation.monolithic import block_scale_vector
 # frozen T23 values (A0 dispatch; docs/validation/m5.md)
 # ---------------------------------------------------------------------------
 
+# 以下常量均为 T23 任务派发（A0）冻结值：用于对比判据、物理尺度与收敛阶梯。
+# 它们不可随求解结果动态调整，也不得为“凑通过”而放宽。
+
 #: Comparison tolerance of the per-variable criterion (frozen proposed value).
+# 逐变量一致性判据的相对容差 rtol（冻结值）。
 T23_RTOL = 1e-8
 
 #: Absolute floor as a fraction of the per-variable physical scale S*.
+# 绝对下限 = 该比例 × 对应变量物理尺度 S*，用于覆盖接近零的量。
 T23_ATOL_SCALE = 1e-10
 
 #: Frozen physical scales of the FSI1 consistency study.
+# FSI1 一致性研究的冻结物理尺度：长度[m]、速度[m/s]、压力[Pa]、线载荷[N/m]。
 T23_SCALES = {"L_star": 0.41, "U_star": 0.2, "P_star": 40.0, "F_star": 14.29426}
 
 #: Per-block scales of the monolithic Newton criterion (same frozen values).
+# 整体 Newton 逐块收敛判据使用的块尺度（复用上面同一组冻结值）。
 T23_BLOCK_SCALES = {"u_f": T23_SCALES["U_star"], "p_f": T23_SCALES["P_star"],
                     "d_s": T23_SCALES["L_star"], "v_s": T23_SCALES["U_star"],
                     "d_m": T23_SCALES["L_star"], "g": T23_SCALES["F_star"]}
 
 #: Tolerances of the (proposed, dispatch-frozen) tightening ladder.
+# 收敛容差的收紧阶梯（由宽到严）：分别对应三个“level”。
 T23_TOLERANCE_LADDER = (1e-6, 1e-8, 1e-10)
 
 #: The FSI1 fixed spec gates (cases/fsi1.json); these are never relaxed.
+# FSI1 规范固定门槛（来自 cases/fsi1.json）：相对/绝对误差上限，绝不放宽。
 FSI1_GATES = {"tip_y_relative_error_max": 0.05, "drag_relative_error_max": 0.05,
               "tip_x_absolute_error_max": 1e-5, "lift_absolute_error_max": 0.1}
 
 #: Method error-gap operationalisation of 23-08 / M-7 (relative vs absolute).
+# 23-08/M-7 的“方法间误差差距”操作化门槛：相对量用统一上限，绝对量分变量设限。
 METHOD_GAP_RELATIVE_MAX = 0.005
 METHOD_GAP_ABSOLUTE_MAX = {"tip_x": 0.005, "lift": 0.005}
 
 
 def now_iso():
+    """当前本地时区的 ISO 8601 时间戳（带时区偏移），用于产物记录。"""
     return datetime.now().astimezone().isoformat()
 
 
 def format_level(tau):
-    """Stable directory label of a tolerance level, e.g. ``1e-06``."""
+    """Stable directory label of a tolerance level, e.g. ``1e-06``.
+
+    把容差值格式化为稳定的目录标签（科学计数、两位指数）；用于按 level 建目录。
+    """
     return f"{float(tau):.0e}"
 
 
@@ -103,7 +129,13 @@ def format_level(tau):
 
 @dataclass(frozen=True)
 class ComparisonRow:
-    """One row of the per-variable consistency table."""
+    """One row of the per-variable consistency table.
+
+    逐变量一致性表的一行（不可变）。字段含义：``size`` 该变量自由度个数；
+    ``magnitude`` 两侧无穷范数的较大者；``max_abs_delta`` 两侧最大绝对差；
+    ``limit = rtol*magnitude + atol`` 为判据上限；``passed`` 是否通过；
+    ``limit_ratio`` = ``max_abs_delta/limit``，>1 即超限。
+    """
 
     name: str
     unit: str
@@ -127,6 +159,7 @@ class ComparisonRow:
 
 
 #: ``(name, unit, scale, description)`` of every compared variable of the T23 table.
+# T23 对比表中每个被比较变量的 (名称, 单位, 物理尺度, 说明)；尺度用于绝对下限 atol。
 CONSISTENCY_SPECS = (
     ("d_s", "m", T23_SCALES["L_star"], "solid P1 displacement, full field"),
     ("tip_A", "m", T23_SCALES["L_star"], "tip A displacement (2 components)"),
@@ -148,6 +181,11 @@ def compare_values(name, left, right, *, unit, scale, rtol=T23_RTOL, atol_scale=
     ``max|a_M - a_P| <= rtol*max(||a_M||inf, ||a_P||inf) + atol`` with
     ``atol = atol_scale*scale``; near-zero quantities are covered by ``atol``
     and never by an unreliable relative error.  Shapes must match exactly.
+
+    中文：对单个变量做冻结判据比较。输入左右两侧数组（形状必须完全一致、有限、
+    非空）与单位/尺度；返回 :class:`ComparisonRow`。``atol=atol_scale*scale``
+    保证近零量由绝对下限兜底，不使用不可靠的相对误差。shape 或数值非法时抛
+    ``ValueError``。
     """
     a = np.asarray(left, dtype=float)
     b = np.asarray(right, dtype=float)
@@ -162,10 +200,10 @@ def compare_values(name, left, right, *, unit, scale, rtol=T23_RTOL, atol_scale=
     if rtol < 0 or atol_scale < 0:
         raise ValueError(f"{name}: tolerances must be nonnegative.")
     delta = np.abs(a-b)
-    max_abs_delta = float(np.max(delta))
-    magnitude = float(max(np.max(np.abs(a)), np.max(np.abs(b))))
-    atol = float(atol_scale)*float(scale)
-    limit = float(rtol)*magnitude+atol
+    max_abs_delta = float(np.max(delta))  # 最大绝对差 max|a_M - a_P|
+    magnitude = float(max(np.max(np.abs(a)), np.max(np.abs(b))))  # 两侧无穷范数较大者
+    atol = float(atol_scale)*float(scale)  # 绝对下限 = 比例 × 物理尺度
+    limit = float(rtol)*magnitude+atol  # 判据上限
     return ComparisonRow(name=name, unit=unit, scale=float(scale), rtol=float(rtol), atol=atol,
                          size=int(a.size), magnitude=magnitude, max_abs_delta=max_abs_delta,
                          limit=limit, passed=bool(max_abs_delta <= limit),
@@ -178,6 +216,10 @@ def consistency_rows(bundle_a, bundle_b, *, rtol=T23_RTOL, atol_scale=T23_ATOL_S
 
     ``bundle_a``/``bundle_b`` are mappings with a value per :data:`CONSISTENCY_SPECS`
     name (any array-like with matching shape).
+
+    中文：对一对方法（整体 vs 分区）的完整变量集合逐项比较，返回
+    :class:`ComparisonRow` 列表；``description`` 末尾追加 ``[a vs b]`` 标注配对标签。
+    两个 bundle 都必须含 :data:`CONSISTENCY_SPECS` 的每个变量名，否则抛错。
     """
     rows = []
     for name, unit, scale, description in CONSISTENCY_SPECS:
@@ -191,7 +233,11 @@ def consistency_rows(bundle_a, bundle_b, *, rtol=T23_RTOL, atol_scale=T23_ATOL_S
 
 
 def pressure_gauge_diagnostic(bundle_a, bundle_b):
-    """Mean/zero-mode shift of two pressure fields (diagnostic only, M-3)."""
+    """Mean/zero-mode shift of two pressure fields (diagnostic only, M-3).
+
+    中文：诊断两个压力场之间的整体零模（常数）偏移，仅用于记录、不参与判定。
+    返回：均值差、去均值后的最大残差、以及原始最大差。用于解释压力可差一个常数。
+    """
     a = np.asarray(bundle_a["p_f"], dtype=float)
     b = np.asarray(bundle_b["p_f"], dtype=float)
     return {"mean_difference": float(np.mean(a)-np.mean(b)),
@@ -209,6 +255,10 @@ def physical_error_gaps(method_metrics, *, gates=None, relative_max=METHOD_GAP_R
     ``tip_y_relative_error``, ``drag_relative_error``, ``lift_absolute_error``).
     Returns ``(gates_check, gaps)``: per-method fixed-gate pass table and every
     method pair's relative/absolute error-gap check.
+
+    中文：把各方法的物理误差指标与固定规范门槛、以及方法两两间的误差差距做检查。
+    ``method_metrics`` 为 {方法标签: 指标字典}；返回 (固定门槛通过表, 两两差距检查列表)。
+    相对误差差距用 ``relative_max``，绝对误差差距按变量用 ``absolute_max``。
     """
     gates = FSI1_GATES if gates is None else gates
     absolute_max = METHOD_GAP_ABSOLUTE_MAX if absolute_max is None else absolute_max
@@ -250,6 +300,7 @@ def physical_error_gaps(method_metrics, *, gates=None, relative_max=METHOD_GAP_R
 # ---------------------------------------------------------------------------
 
 #: ``item -> (unit, definition)`` of the required T23 cost items.
+# T23 成本表要求的成本项 -> (单位, 定义)；单位 None 表示计数类，无量纲。
 COST_ITEMS = {
     "total_seconds": ("s", "wall clock of the solve stage (mesh generation excluded, plotting excluded)"),
     "mesh_seconds": ("s", "mesh generation, recorded separately"),
@@ -269,7 +320,11 @@ COST_ITEMS = {
 
 
 def summarize_values(values):
-    """Median/min/max/count of a numeric sequence (NaN-free)."""
+    """Median/min/max/count of a numeric sequence (NaN-free).
+
+    中文：对数值序列做稳健汇总；自动跳过 ``None`` 与非有限值（NaN/inf）。
+    输入可为含缺失项的序列，输出含 ``count/median/min/max``；全空时除 count 外为 None。
+    """
     clean = [float(value) for value in values if value is not None and np.isfinite(value)]
     if not clean:
         return {"count": 0, "median": None, "min": None, "max": None}
@@ -284,6 +339,10 @@ def cost_rows(entries):
     ``entries`` is a sequence of ``{"method", "level", "repeat", "cost"}``
     records (the ``cost`` mapping may omit items that do not apply to the
     method).  Only items present in at least one repeat are emitted.
+
+    中文：把多次重复的成本记录聚合成“方法 × 层级 × 成本项”的长表。``entries``
+    为记录序列，每条含 method/level/repeat/cost；同一键的多次重复取中位数与极值。
+    仅输出至少出现过一次的成本项；单位与定义取自 :data:`COST_ITEMS`。
     """
     grouped = {}
     for entry in entries:
@@ -304,6 +363,8 @@ def cost_rows(entries):
 
 
 def write_json(path, payload):
+    """中文：将 ``payload`` 以 UTF-8、缩进 2、禁止 NaN 的 JSON 写入 ``path``；
+    自动创建父目录，并原样返回 payload 便于链式使用。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, allow_nan=False)+"\n", encoding="utf-8")
@@ -311,6 +372,7 @@ def write_json(path, payload):
 
 
 def file_sha256(path):
+    """中文：分块（1 MiB）计算文件 SHA-256 十六进制摘要，用于产物可复现性指纹。"""
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for chunk in iter(lambda: stream.read(1 << 20), b""):
@@ -319,7 +381,12 @@ def file_sha256(path):
 
 
 def environment_snapshot():
-    """Code/environment fingerprint required by T23 section 4.2."""
+    """Code/environment fingerprint required by T23 section 4.2.
+
+    中文：采集运行环境指纹：Python/可执行文件/平台、CPU 与内存（读 /proc，缺失则
+    记 unknown）、关键依赖版本、BLAS 线程数环境变量、git HEAD 与状态、时间戳。
+    用于 T23 4.2 要求的可复现代码/环境快照。
+    """
     packages = {}
     for name in ("fsi-ice", "numpy", "scipy", "matplotlib", "gmsh"):
         try:
@@ -371,7 +438,13 @@ def environment_snapshot():
 
 @dataclass(frozen=True)
 class MonolithicCaseSetup:
-    """Frozen structural inputs of one monolithic FSI1 case (h level)."""
+    """Frozen structural inputs of one monolithic FSI1 case (h level).
+
+    中文：单个整体 FSI1 算例（某一网格尺寸 h）的冻结结构输入：块布局、拓扑、调和
+    延拓、材料、流体密度/粘度/平均速度、翼尖节点、参考网格、固体网格、块尺度、
+    模板上下文与初值 ``x0``、时间步 ``dt``、候选标识。``__post_init__`` 对
+    ``scales``/``x0`` 做防御性拷贝，避免外部修改。
+    """
 
     layout: object
     topology: object
@@ -395,7 +468,12 @@ class MonolithicCaseSetup:
 
 
 def initial_velocity(layout, fluid_space, mean_velocity):
-    """Explicit initial P2 velocity: inlet Dirichlet data, zero elsewhere."""
+    """Explicit initial P2 velocity: inlet Dirichlet data, zero elsewhere.
+
+    中文：构造显式初始 P2 速度场：仅在流体 Dirichlet 节点（入口）填入抛物线
+    :func:`inlet_profile`，其余为零。输入布局、流体速度空间与入口平均速度[m/s]；
+    返回 ``(n_points, 2)`` 速度数组[m/s]。
+    """
     velocity = np.zeros((len(fluid_space.points), 2))
     velocity[layout.fluid_dirichlet_nodes] = inlet_profile(
         fluid_space.points[layout.fluid_dirichlet_nodes], mean_velocity)
@@ -411,6 +489,11 @@ def build_monolithic_case(problem, config, *, dt, candidate_id=("m5-t23", "monol
     partitioned data: zero displacement/velocity/load, reference geometry and
     the inlet parabolic Dirichlet values (the same boundary callable as the
     partitioned fluid solves).
+
+    中文：为整体求解构建模板上下文、冻结块尺度与显式初值，并打包为
+    :class:`MonolithicCaseSetup`。共用分区算例的同一网格/拓扑，保证三种方法离散一致
+    （``pressure_pin=None``）。初值完全不含分区数据：固体位移/速度/界面载荷为零、
+    参考 ALE 几何、流体入口抛物线 Dirichlet（与分区流体同一边界函数）。
     """
     fluid = problem.fluid_mesh
     solid = problem.solid_mesh
@@ -424,6 +507,7 @@ def build_monolithic_case(problem, config, *, dt, candidate_id=("m5-t23", "monol
     zero_fluid = np.zeros((len(topology.fluid_space.points), 2))
     zero_mesh = np.zeros_like(fluid.points)
     geometry = build_ale_geometry(fluid, zero_mesh, candidate_id=(candidate_id, "initial"))
+    # 初始 BDF 历史为一层零状态（BDF1 启动），随后取一步 stencil 作为代际号。
     history = BDFHistory(np.zeros((2, len(solid.points), 2)), dt, order=1)
     history.accept(history.context(), np.zeros((2, len(solid.points), 2)))
     stencil = history.stencil()
@@ -438,7 +522,7 @@ def build_monolithic_case(problem, config, *, dt, candidate_id=("m5-t23", "monol
     template = MonolithicContext(layout, base, stencil, topology, problem.extension,
                                  candidate_id=(candidate_id, "template"),
                                  thickness=problem.material.thickness, pressure_constraint=None)
-    x0 = np.zeros(layout.n_total)
+    x0 = np.zeros(layout.n_total)  # 全局状态向量；初值仅流体速度块非零
     x0[layout.slice_of("u_f")] = initial_velocity(
         layout, topology.fluid_space, float(config["fluid"]["mean_velocity"])).ravel()
     return MonolithicCaseSetup(
@@ -451,6 +535,8 @@ def build_monolithic_case(problem, config, *, dt, candidate_id=("m5-t23", "monol
 
 
 def _step_record_dict(record, *, global_index, chunk):
+    """中文：把单个 march 步记录展开为 JSON 可序列化字典。``global_index`` 为跨分块
+    的全局步号，``chunk`` 为所属分块号；展开 BDF 时间项、界面间隙、计数器与计时。"""
     return {
         "index": int(global_index), "chunk": int(chunk), "generation": int(record.generation),
         "order": int(record.order), "dt": float(record.dt),
@@ -468,7 +554,13 @@ def _step_record_dict(record, *, global_index, chunk):
 
 @dataclass(frozen=True)
 class MarchRecord:
-    """Aggregated outcome of one budgeted monolithic march level."""
+    """Aggregated outcome of one budgeted monolithic march level.
+
+    中文：一个受限（预算内）整体 march 层级的汇总结果：``reason`` 停止原因
+    （steady/max_steps/wall_seconds/newton_failure）、是否达到稳态、最终标度后 BDF
+    时间项、逐步记录、最终状态 ``x``、计数器与计时、分块数与墙钟时间、失败详情与
+    启动预算。``__post_init__`` 将 ``x`` 置为只读并冻结各 dict/tuple。
+    """
 
     level: float
     steady_tolerance: float
@@ -500,7 +592,11 @@ class MarchRecord:
 
 
 def _plain(value):
-    """Best-effort JSON-safe conversion of diagnostics values."""
+    """Best-effort JSON-safe conversion of diagnostics values.
+
+    中文：尽力把诊断值转为 JSON 安全类型：dict/list 递归；ndarray 直接丢弃（None，
+    避免体积巨大的状态数组进入失败记录）；numpy 标量转原生 bool/int/float；其它转 str。
+    """
     if isinstance(value, dict):
         return {str(key): _plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -519,6 +615,8 @@ def _plain(value):
 
 
 def _failure_dict(error, *, chunk, completed):
+    """中文：从 ``MonolithicNewtonFailure`` 提取失败详情字典（阶段、迭代、原因、残差、
+    步号、已完成步数、计数器/计时、可序列化诊断），供 ``failure.json``/summary 记录。"""
     counters = getattr(error, "counters", None)
     timings = getattr(error, "timings", None)
     return {
@@ -543,6 +641,11 @@ def state_context(case, x, *, dt, candidate_id):
     state, otherwise the march re-integrates the initial transient from a stale
     base.  The fresh history is a one-layer BDF1 startup (the march driver
     always starts with a BDF1 step), which is the correct continuation behaviour.
+
+    中文：构造以 ``x`` 为“已接受第 0 层”的续算/热启动上下文。因为 ``march_to_steady``
+    会以 ``context.base`` 重新锚定 BDF 历史，任何受限或热启动的 march 都必须传入
+    预期的已接受状态，否则会从过期基态重新积分初始瞬态。新历史为单层 BDF1 启动层
+    （驱动器总是先做一步 BDF1），这正是正确的续算行为。
     """
     blocks = case.layout.unpack(x)
     d_s = np.array(blocks["d_s"], copy=True)
@@ -586,10 +689,16 @@ def march_level(case, *, level, steady_tolerance, newton_rtol, newton_atol, star
     level (no exception, no silent continuation).  ``initial_context`` overrides
     the first chunk's history anchor (used for warm starts); the default
     ``case.template`` is the explicit cold-start state.
+
+    中文：对单个容差层级做“分块受限”的 ``march_to_steady``。为满足墙钟预算，把 march
+    切成若干 chunk 并拼接步记录/计数器/计时；每个 chunk 之间用当前已接受状态重建续算
+    上下文（:func:`state_context`），使每次重启都从当前状态做真实 BDF1 启动，BDF 不动点
+    不变。``MonolithicNewtonFailure`` 被捕获并作为“失败层级”返回（不抛异常、不静默续算）。
+    ``initial_context`` 覆盖首块的历史锚点（热启动用），默认 ``case.template`` 为冷启动。
     """
     dt = float(case.dt if dt is None else dt)
     state = np.array(case.x0 if start is None else start, dtype=float, copy=True)
-    start_norm = float(np.max(np.abs(state)))
+    start_norm = float(np.max(np.abs(state)))  # 记录起点的最大绝对值（预算诊断）
     started = time.perf_counter()
     steps = []
     counters = MonolithicCounters()
@@ -612,7 +721,7 @@ def march_level(case, *, level, steady_tolerance, newton_rtol, newton_atol, star
         if elapsed >= float(wall_seconds):
             reason = "wall_seconds"
             break
-        chunk = min(int(chunk_steps), int(max_steps)-len(steps))
+        chunk = min(int(chunk_steps), int(max_steps)-len(steps))  # 本块步数，不越过总步数上限
         options = NewtonOptions(max_iterations=int(max_iterations), rtol=float(newton_rtol),
                                 atol=float(newton_atol))
         if progress is not None:
@@ -623,6 +732,7 @@ def march_level(case, *, level, steady_tolerance, newton_rtol, newton_atol, star
                                      steady_tolerance=float(steady_tolerance), options=options,
                                      scales=case.scales, jacobian_mode="assembled")
         except MonolithicNewtonFailure as error:
+            # 失败：保留已接受的 partial 步与计数器/计时，记录 failure 而非抛出。
             failure = _failure_dict(error, chunk=chunks, completed=len(steps))
             partial = list(getattr(error, "march_steps", ()) or ())
             for record in partial:
@@ -644,7 +754,7 @@ def march_level(case, *, level, steady_tolerance, newton_rtol, newton_atol, star
             buckets[key] += float(result.timings[key])
         buckets["chunk_total_seconds"] += float(result.timings["total_seconds"])
         final_terms = {key: float(value) for key, value in dict(result.final_time_terms).items()}
-        final_term = float(result.final_time_term)
+        final_term = float(result.final_time_term)  # 标度后 BDF 时间项；低于容差即达稳态
         state = np.array(result.x, dtype=float, copy=True)
         if progress is not None:
             progress(f"level {level:g}: chunk {chunks} done, steps {len(steps)}, "
@@ -680,6 +790,10 @@ def steady_diagnostics(case, x, *, dt, candidate_id=("m5-t23", "fixed-point")):
     the residual is the steady discrete equation (T22 section 5).  Returns the
     scaled block maxima, the T21 block norms and the candidate geometry
     diagnostics.
+
+    中文：在“自洽”的 BDF2 历史上评估状态 ``x`` 的稳态残差。因为两个已接受层都等于
+    ``x``，BDF2 时间项精确抵消，残差即稳态离散方程（T22 第 5 节）。返回按块尺度归一
+    的残差最大值、T21 块范数监控与候选几何诊断（含界面相容间隙）。
     """
     layout = case.layout
     blocks = layout.unpack(x)
@@ -695,6 +809,7 @@ def steady_diagnostics(case, x, *, dt, candidate_id=("m5-t23", "fixed-point")):
     base = MonolithicBase(
         reference_mesh=case.reference_mesh, material=case.material,
         fluid_density=case.fluid_density, fluid_viscosity=case.fluid_viscosity,
+        # 两层都取 (d_s, v_s)/(u_f, u_f)：时间项恒为零，只留下稳态残差。
         solid_states=((d_s, v_s), (d_s, v_s)), fluid_states=(u_f, u_f),
         accepted_geometries=(geometry, geometry), generation=stencil.step_id,
         fluid_boundary_velocity=lambda points: inlet_profile(points, case.mean_velocity))
@@ -703,6 +818,7 @@ def steady_diagnostics(case, x, *, dt, candidate_id=("m5-t23", "fixed-point")):
                                 thickness=case.material.thickness, pressure_constraint=None)
     evaluation = evaluate_monolithic(x, context=context, mode="residual")
     residual = evaluation.residual
+    # 每个块按自身物理尺度归一后取最大绝对值，再对块取最大，得到稳态残差范数。
     scaled = {name: float(np.max(np.abs(residual[layout.slice_of(name)]/case.scales[layout.slice_of(name)])))
               for name in BLOCK_NAMES}
     return {
@@ -724,6 +840,9 @@ def previous_level_state(root, mesh_size, level):
     numerically **larger** value (1e-6 is less tight than 1e-8).  The closest
     less-tight state is therefore the minimum among the values greater than
     ``level``.  Used for monolithic-to-monolithic warm starts only.
+
+    中文：返回比 ``level`` 更宽松（即容差数值更大、如 1e-6 相对 1e-8 更松）的最近层级
+    的最终状态；不存在则返回 ``None``。仅用于整体到整体的热启动；按层级目录名解析。
     """
     base = Path(root)/"monolithic"/f"h_{mesh_size:g}"
     if not base.exists():
@@ -735,11 +854,11 @@ def previous_level_state(root, mesh_size, level):
         except (IndexError, ValueError):
             continue
         state = path/"final_state.npz"
-        if value > float(level) and state.exists():
+        if value > float(level) and state.exists():  # 只取更宽松且存在最终状态的层级
             candidates.append((value, state))
     if not candidates:
         return None
-    return min(candidates, key=lambda item: item[0])[1]
+    return min(candidates, key=lambda item: item[0])[1]  # 更宽松层级中取最接近者
 
 
 def monolithic_metrics(case, problem, config, x):
@@ -748,6 +867,11 @@ def monolithic_metrics(case, problem, config, x):
     The cylinder force is recomputed with the shared ``boundary_force`` kernel
     on the candidate geometry; the interface contribution is the sum of the
     converged ``g`` block (already integrated, thickness counted once).
+
+    中文：用与分区一致的受力公式计算整体状态的翼尖位移与阻力/升力。圆柱面力由共享
+    ``boundary_force`` 核在候选几何上重算；界面贡献为已收敛 ``g`` 块之和（已积分、
+    厚度只计一次）。输出含 tip/drag/lift 及其相对/绝对误差、圆柱面/界面分项、以及
+    界面力与 ``H^T g`` 之和的核对项、网格质量指标。单位：力为 N/m（单位厚度）。
     """
     layout = case.layout
     blocks = layout.unpack(x)
@@ -759,7 +883,7 @@ def monolithic_metrics(case, problem, config, x):
                                pressure=np.array(blocks["p_f"], copy=True))
     cylinder = boundary_force(operators, solution, "cylinder-rigid-wall")
     g = np.asarray(blocks["g"]).ravel()
-    interface_force = g.reshape(-1, 2).sum(axis=0)
+    interface_force = g.reshape(-1, 2).sum(axis=0)  # 界面节点力求和 -> 合力 (N/m)
     total = cylinder+interface_force
     tip = np.asarray(blocks["d_s"])[case.tip_node]
     reference = config["reference"]
@@ -780,15 +904,20 @@ def monolithic_metrics(case, problem, config, x):
 
 
 def monolithic_solution_fields(case, x):
-    """T23 comparison bundle of one monolithic state."""
+    """T23 comparison bundle of one monolithic state.
+
+    中文：把一个整体状态打包为 T23 逐变量对比所需的字段字典。``interface_x`` 为固体
+    界面位移迹 ``d_s|Gamma``（按 ``solid_dofs`` 抽取），``interface_H = H d_s|Gamma``
+    为其映射到流体 P2 迹，``lambda = H^T g`` 为映射回固体紧凑迹的对偶载荷。
+    """
     layout = case.layout
     blocks = layout.unpack(x)
     d_s = np.asarray(blocks["d_s"])
     u_f = np.asarray(blocks["u_f"])
     g = np.asarray(blocks["g"]).ravel()
     interface_x = d_s.ravel()[case.topology.solid_dofs]
-    lambda_ = np.asarray(case.topology.H.T @ g).ravel()
-    h_d_s = np.asarray(case.topology.H @ interface_x).ravel()
+    lambda_ = np.asarray(case.topology.H.T @ g).ravel()  # H^T g：流体迹载荷映射到固体迹
+    h_d_s = np.asarray(case.topology.H @ interface_x).ravel()  # H d_s|Gamma：映射到流体 P2 迹
     return {
         "d_s": d_s.ravel().copy(), "tip_A": np.array(d_s[case.tip_node], copy=True),
         "u_f": u_f.ravel().copy(), "p_f": np.asarray(blocks["p_f"]).ravel().copy(),
@@ -803,10 +932,13 @@ def monolithic_solution_fields(case, x):
 # output conventions (T20 style: clean slate, failure.json on failure)
 # ---------------------------------------------------------------------------
 
+# 整体算例的标准产物文件清单（T20 风格：先清空旧产物，失败时写 failure.json）。
 _MONOLITHIC_FILES = ("summary.json", "failure.json", "steps.csv", "solution.npz", "final_state.npz")
 
 
 def clear_monolithic_outputs(output):
+    """中文：清空某层级的旧产物（标准文件与 ``steps_partial*.csv``），避免失败重跑
+    残留上次成功结果。返回输出目录 ``Path``。"""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     for name in _MONOLITHIC_FILES:
@@ -817,6 +949,8 @@ def clear_monolithic_outputs(output):
 
 
 def write_monolithic_failure(output, *, level, stage, reason, extra=None):
+    """中文：写 ``failure.json``（status=FAIL）记录失败层级、阶段与原因，并删除可能
+    残留的勾选产物（summary/steps/solution），确保失败不会被误读为成功。返回 payload。"""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     for name in ("summary.json", "steps.csv", "solution.npz"):
@@ -832,7 +966,12 @@ def write_monolithic_failure(output, *, level, stage, reason, extra=None):
 def write_monolithic_level(output, record, *, metrics=None, steady=None, config_snapshot=None,
                            environment=None, setup_seconds=None, mesh_seconds=None,
                            initial_state=None):
-    """Write ``steps.csv``, ``summary.json``, ``solution.npz``, ``final_state.npz``."""
+    """Write ``steps.csv``, ``summary.json``, ``solution.npz``, ``final_state.npz``.
+
+    中文：写某一层级的结果产物。``status`` 依 ``record.steady_reached`` 判定
+    PASS/FAIL；可选字段（网格/装配耗时、物理指标、稳态残差、配置快照、环境指纹、
+    初始状态路径）在提供时追加。最终状态存 ``final_state.npz``，摘要存 ``summary.json``。
+    """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     if record.steps:
@@ -873,6 +1012,8 @@ def write_monolithic_level(output, record, *, metrics=None, steady=None, config_
 
 
 def _flatten_rows(rows):
+    """中文：把嵌套的步记录行展平为 CSV 行：``counters``/``timings`` 展开为
+    ``counter_*``/``timing_*`` 前缀列，其余字段原样保留。"""
     flat = []
     for row in rows:
         item = {key: value for key, value in row.items()
@@ -886,12 +1027,20 @@ def _flatten_rows(rows):
 
 
 def flatten_step_rows(rows):
-    """Public alias of the step-row flattener used by ``steps.csv``."""
+    """Public alias of the step-row flattener used by ``steps.csv``.
+
+    中文：``_flatten_rows`` 的公开别名，供 ``steps.csv`` 生成使用。
+    """
     return _flatten_rows(rows)
 
 
 def write_monolithic_solution(output, case, x):
-    """``solution.npz`` with the same field names as the partitioned artifacts."""
+    """``solution.npz`` with the same field names as the partitioned artifacts.
+
+    中文：写 ``solution.npz``，字段名与分区产物保持一致，便于同一后处理流程读取：
+    含固体点/单元与位移/速度、流体参考/当前点与单元、流体速度/压力、网格位移、
+    全局状态、翼尖节点号，以及界面位移/映射值/载荷。返回对比字段 bundle。
+    """
     layout = case.layout
     blocks = layout.unpack(x)
     d_m = np.asarray(blocks["d_m"])

@@ -23,6 +23,11 @@ Conventions (frozen with the T21 task card)
   well-conditioned problem needs steps below ``1e-7`` before rounding dominates,
   so the trend scan uses :data:`EXTENDED_STEPS` while the required gate applies
   to the whole set.
+
+中文说明：本模块对整体（monolithic）残差与 Jacobian 做方向导数校验：用中心差分逼近
+J·q，再与 matrix-free 的 monolithic_jvp 或装配好的 Jacobian 比对。整体验证的核心是
+"块尺度向量"——按变量块（速度/压力/位移/载荷等）为每个残差行与每个方向分量赋特征量级，
+使无量纲化的相对误差在不同物理量之间可比。
 """
 
 from dataclasses import dataclass
@@ -66,7 +71,11 @@ def _block_slice(layout, names):
 
 
 def block_scale_vector(layout, per_block):
-    """Full-length scale vector from a ``{block: scalar or array}`` mapping."""
+    """Full-length scale vector from a ``{block: scalar or array}`` mapping.
+
+    中文：把按变量块给出的尺度（标量，或与该块形状一致的数组）展开为与整体布局等长
+    的尺度向量，用于无量纲化。要求每个块都提供尺度，且全部有限、严格为正。
+    """
     vector = np.empty(layout.n_total)
     for name in BLOCK_NAMES:
         if name not in per_block:
@@ -85,7 +94,12 @@ def block_scale_vector(layout, per_block):
 
 @dataclass(frozen=True)
 class DirectionalDerivativeResult:
-    """Central-difference scan of one direction against the analytic derivative."""
+    """Central-difference scan of one direction against the analytic derivative.
+
+    中文：记录某一方向在若干差分步长下的中心差分结果与解析导数的比对。字段含每步的
+    相对/绝对误差、解析响应范数、是否退化（解析响应近似为零）、最佳误差及步长，以及
+    误差随步长的趋势。
+    """
 
     steps: tuple
     relative_errors: tuple
@@ -114,6 +128,7 @@ class DirectionalDerivativeResult:
 
 
 def _trend_of(errors):
+    # 截断误差随步长减小、舍入误差随步长减小而增大，故最优误差应出现在中间步长。
     values = np.asarray(errors, dtype=float)
     best = int(np.argmin(values))
     if 0 < best < len(values)-1 and values[0] > values[best] and values[-1] > values[best]:
@@ -142,6 +157,10 @@ def central_difference_vectors(x, direction, *, context, variable_scales, steps=
     ``q`` is the physical ``direction`` divided by ``variable_scales``.  The
     residual evaluations never modify ``x`` or the context, so the vectors can
     be shared by several analytic variants (used by :func:`completeness_audit`).
+
+    中文：对每个步长计算中心差分向量 (R(x+hq)-R(x-hq))/(2h)，其中 q = direction /
+    variable_scales（无量纲方向）。残差求值不修改 x 或 context，故这些向量可被多个
+    解析变体复用（见 completeness_audit）。返回 (q, 向量列表)。
     """
     q, _ = _validated_inputs(x, direction, context, variable_scales, np.ones(context.layout.n_total))
     vectors = []
@@ -157,6 +176,7 @@ def central_difference_vectors(x, direction, *, context, variable_scales, steps=
 
 def _scan_from_vectors(vectors, analytic, residual_scale, steps, degenerate_tolerance):
     analytic = np.asarray(analytic, dtype=float)
+    # 解析响应按残差尺度归一后取 2-范数；低于容差视为退化（近似为零响应）。
     analytic_norm = float(np.linalg.norm(analytic/residual_scale))
     degenerate = analytic_norm <= degenerate_tolerance
     relative, absolute = [], []
@@ -189,6 +209,10 @@ def directional_derivative_scan(x, direction, *, context, variable_scales, resid
     ``analytic`` overrides the matrix-free ``monolithic_jvp`` result (e.g. to
     audit an assembled Jacobian).  Nothing is modified; repeated calls with the
     same inputs give identical numbers.
+
+    中文：把方向在物理单位下给出、再用 variable_scales 归一化；residual_scales 用于
+    对残差各行归一化。analytic 可覆盖默认的 matrix-free 结果（例如审计装配 Jacobian）。
+    函数无副作用，同输入重复调用结果完全一致。
     """
     q, vectors = central_difference_vectors(x, direction, context=context,
                                             variable_scales=variable_scales, steps=steps)
@@ -204,6 +228,9 @@ def jacobian_jvp_gap(x, direction, *, context, jacobian=None, variable_scales=No
 
     Returns ``(max_abs_gap, scaled_relative_gap)``; ``q = direction`` when no
     variable scales are given, otherwise ``q = direction/variable_scales``.
+
+    中文：比较装配 Jacobian 与 matrix-free JVP 的一致性，返回 (最大绝对差,
+    按残差尺度归一后的相对差)；未给 variable_scales 时 q 直接取 direction。
     """
     from fsi_ice.coupling.monolithic import monolithic_jacobian
 
@@ -228,6 +255,10 @@ def completeness_audit(x, direction, *, context, jacobian=None, variable_scales,
     error above that limit for a direction that exercises the block, otherwise
     the audit reports it as not detected.  Returns ``{variant: scan}`` with
     ``"full"`` first.
+
+    中文：整体 Jacobian 必须能在 RELATIVE_DERIVATIVE_LIMIT 内复现中心差分；逐个删去
+    一个耦合矩形（BLOCK_RECTANGLES）后，对能激发该块的方向，误差应升到限值之上，
+    否则审计报告该块"未被检出"。返回 {变体名: 扫描结果}，首个键为 "full"。
     """
     from fsi_ice.coupling.monolithic import monolithic_jacobian
 
@@ -245,7 +276,11 @@ def completeness_audit(x, direction, *, context, jacobian=None, variable_scales,
 
 
 def drop_jacobian_block(matrix, row_slice, column_slice):
-    """Zero a rectangular block of a CSR matrix (copy-on-write)."""
+    """Zero a rectangular block of a CSR matrix (copy-on-write).
+
+    中文：把 CSR 矩阵中指定行列范围的矩形块置零，采用写时复制，不修改原矩阵；
+    置零后调用 eliminate_zeros 清理显式零元。
+    """
     result = matrix.tocsr(copy=True)
     row_mask = np.zeros(result.shape[0], dtype=bool)
     row_mask[np.arange(result.shape[0])[row_slice]] = True

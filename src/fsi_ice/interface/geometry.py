@@ -12,6 +12,14 @@ Candidate versions are rejected instead of repaired: a different connectivity,
 a non-CCW current mesh, a non-positive solid Jacobian, a degenerate current
 edge or a gap between the solid and fluid current interface raises a
 ``ValueError`` that reports the offending edge or node.
+
+本模块针对固定参照拓扑评估一个候选构形的当前界面几何：逐棱的当前积分点、长度、
+两域当前外法向、固体变形梯度 ``F_s``/``J_s`` 以及沿两条独立路径计算的面积比
+``j_Gamma``（当前长度比 ``l/L0`` 与 Nanson 公式 ``J_s ||F_s^-T N_s||``）。关键
+约定：参照拓扑只匹配一次、此处不再重匹配；参照网格、固体位移输入与时间历史均不
+改动。候选版本只拒绝不修复：连通性不同、当前网格非逆时针、固体雅可比非正、当前
+棱退化或固流当前界面不重合，都会抛出 ``ValueError`` 并指出违规棱/节点。长度量纲
+用参考/当前坐标，``F_s`` 与 ``J_s`` 无量纲。
 """
 
 from dataclasses import dataclass
@@ -21,8 +29,10 @@ import numpy as np
 from fsi_ice.fem.p1 import physical_gradients
 from fsi_ice.interface.topology import InterfaceTopology, _digest
 
+# 参照单位三角形的三个顶点，棱的逆时针局部编号为 (0,1),(1,2),(2,0)。
 REFERENCE_VERTICES = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
 REFERENCE_VERTICES.setflags(write=False)
+# 局部棱端点对 -> P2 局部基函数下标（3/4/5 为三个棱中点自由度）。
 EDGE_COLUMNS = {(0, 1): 3, (1, 2): 4, (2, 0): 5}
 
 
@@ -32,12 +42,18 @@ def _read_only(array):
 
 
 def _quadrature():
+    # 3 点 Gauss-Legendre 规则，从 [-1,1] 仿射映射到参考棱参数区间 [0,1]。
     abscissae, weights = np.polynomial.legendre.leggauss(3)
     return (abscissae+1)/2, weights/2
 
 
 def _edge_local(cells, owner, edge, side):
-    """Recover the CCW local endpoint indices of ``edge`` in its owner cell."""
+    """Recover the CCW local endpoint indices of ``edge`` in its owner cell.
+
+    在所有者单元 ``owner`` 内恢复棱 ``edge`` 的逆时针局部端点下标，返回
+    ``(first, second)``，即 ``edge[0]``/``edge[1]`` 在单元连通性中的位置。若任一端点
+    不唯一出现则报错；``side`` 仅用于错误信息。
+    """
     row = np.asarray(cells)[owner]
     first = np.flatnonzero(row == edge[0])
     second = np.flatnonzero(row == edge[1])
@@ -55,6 +71,17 @@ class InterfaceGeometry:
     solid edge lengths and ``n_s``/``n_f`` the current outward normals of the
     two domains; ``j_Gamma_current`` is ``l/L0`` while ``j_Gamma_nanson`` is
     ``J_s ||F_s^-T N_s||``.  All arrays are read-only and no history is stored.
+
+    一个拓扑、一个版本的冻结候选界面几何。逐棱数组按 ``edge_pairs`` 顺序索引：
+    ``x_q`` 为固体侧当前积分点坐标（长度量纲），``lengths`` 为当前固体棱长，
+    ``n_s``/``n_f`` 为两域当前外法向（单位向量）；``j_Gamma_current`` 为长度比
+    ``l/L0``，``j_Gamma_nanson`` 为 Nanson 面积比 ``J_s ||F_s^-T N_s||``，二者均
+    无量纲。``F_s`` 为固体变形梯度、``J_s=det(F_s)``（无量纲），``vertex_coordinates``
+    与 ``fluid_p2_coordinates`` 为当前界面节点/中点坐标。``normal_error``、
+    ``normalization_error``、``nanson_normal_error``、``surface_ratio_error``、
+    ``gap_error`` 为各项自洽误差，``gap_tolerance`` 为固流界面重合容差（长度量纲），
+    ``minimum_jacobian``/``minimum_cell_determinant`` 为最小固体雅可比与最小流体
+    单元行列式。所有数组只读，不存历史。
     """
 
     topology_id: str
@@ -110,7 +137,12 @@ class InterfaceGeometry:
         return len(self.weights)
 
     def require_current(self, operators):
-        """Reject operators assembled on another candidate geometry or version."""
+        """Reject operators assembled on another candidate geometry or version.
+
+        拒绝在当前候选网格/版本之外装配的 ``operators``：要求其空间所属网格就是
+        ``self.current_mesh``，且 P2 连通性与棱中点表与 ``self.current_space`` 一致。
+        不一致时抛 ``ValueError``，防止在不同候选上误用算子。
+        """
         mesh = getattr(getattr(operators, "space", None), "mesh", None)
         if mesh is not self.current_mesh:
             raise ValueError("InterfaceGeometry was evaluated for a different candidate mesh; "
@@ -138,6 +170,7 @@ def _current_determinants(points, cells):
     first = vertices[:, 1]-vertices[:, 0]
     second = vertices[:, 2]-vertices[:, 0]
     with np.errstate(over="ignore", invalid="ignore"):
+        # 二维叉积 det(J_x) = (p1-p0) x (p2-p0)；逆时针单元应为正，否则翻转或退化。
         determinant = first[:, 0]*second[:, 1]-first[:, 1]*second[:, 0]
     if not np.all(np.isfinite(determinant)):
         raise ValueError("Current mesh determinants over/underflow.")
@@ -159,6 +192,13 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
     between the solid and fluid current interface is rejected with the
     offending edge/node reported.  Neither the reference meshes nor any time
     history is modified.
+
+    针对固定参照拓扑评估候选界面几何。输入 ``current_mesh`` 为候选流体 P1 网格、
+    ``current_space`` 为其 P2 空间、``solid_displacement`` 为完整固体 ``(n_s_nodes, 2)``
+    位移（长度量纲）。参照拓扑必须由 ``current_mesh`` 的参照流体网格构建；连通性
+    不同、候选翻转、固体雅可比非正、棱退化或固流当前界面存在间隙都会被拒绝，并
+    报出违规棱/节点。参照网格与时间历史均不修改；返回只读的
+    :class:`InterfaceGeometry`，``candidate_id`` 用于标识该候选版本。
     """
     if not isinstance(topology, InterfaceTopology):
         raise TypeError("topology must be an InterfaceTopology.")
@@ -207,6 +247,7 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
     n_f = np.empty((n_edges, 2))
     F_s = np.empty((n_edges, 2, 2))
     J_s = np.empty(n_edges)
+    # 逐棱计算当前积分点、当前棱长、两域当前外法向以及固体变形梯度/雅可比。
     for index, pair in enumerate(topology.edge_pairs):
         solid_owner[index] = pair.solid_owner
         fluid_owner[index] = pair.fluid_owner
@@ -221,6 +262,7 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
                                   + s_solid[:, None]*REFERENCE_VERTICES[b_s])
         reference_fluid[index] = ((1-abscissae)[:, None]*REFERENCE_VERTICES[a_f]
                                   + abscissae[:, None]*REFERENCE_VERTICES[b_f])
+        # 当前固体棱端点 = 参照坐标 + 位移；流体棱端点直接取当前网格坐标。
         current_solid = solid_points[list(pair.solid_edge)]+displacement[list(pair.solid_edge)]
         current_fluid = points[list(pair.fluid_edge)]
         x_q[index] = (1-s_solid)[:, None]*current_solid[0]+s_solid[:, None]*current_solid[1]
@@ -233,9 +275,11 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
             raise ValueError(f"Interface edge {index} (solid {pair.solid_edge}, fluid {pair.fluid_edge}) is "
                              f"degenerate in the candidate configuration: lengths "
                              f"{lengths[index]:.12g} and {fluid_lengths[index]:.12g}.")
+        # 当前外法向 = 逆时针切线旋转 -90° 归一化：(t_y, -t_x)/|t|。
         n_s[index] = [tangent[1]/lengths[index], -tangent[0]/lengths[index]]
         n_f[index] = [fluid_tangent[1]/fluid_lengths[index], -fluid_tangent[0]/fluid_lengths[index]]
         local_nodes = solid_cells[pair.solid_owner]
+        # F_s = I + grad(u)：由所有者在固体单元内插值位移梯度得到；J_s = det(F_s) 应为正。
         F_s[index] = np.eye(2)+np.einsum("ai,aJ->iJ", displacement[local_nodes], solid_gradients[pair.solid_owner])
         J_s[index] = np.linalg.det(F_s[index])
     bad = np.flatnonzero(~np.isfinite(J_s) | (J_s <= 0))
@@ -249,6 +293,7 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
 
     vertex_coordinates = np.asarray(topology.X_s_gamma, dtype=float)+displacement[topology.solid_nodes]
     fluid_vertex_coordinates = space_points[topology.fluid_vertex_nodes]
+    # 三类固流界面间隙：顶点、棱中点（两端点平均）与当前积分点，均应为零（在容差内）。
     vertex_gap = np.linalg.norm(vertex_coordinates-fluid_vertex_coordinates, axis=1)
     solid_row = {int(node): row for row, node in enumerate(topology.solid_nodes)}
     midpoint_gap = np.empty(n_edges)
@@ -267,11 +312,14 @@ def evaluate_interface_geometry(topology, current_mesh, current_space, solid_dis
                          f"exceeds tolerance {gap_tolerance:.6e} (topology atol={topology.atol!r}, "
                          f"rtol={topology.rtol!r}); the candidate geometry is inconsistent or cracked.")
 
+    # 路径一：当前长度比 j = l/L0。
     j_current = lengths/topology.reference_lengths
+    # 路径二：Nanson 面积比。F_s^-T N_s 经 J_s 加权后取模长；transformed 为变形后的参照法向。
     transformed = np.linalg.solve(np.transpose(F_s, (0, 2, 1)), np.asarray(topology.N_s)[:, :, None])[:, :, 0]
     transformed_norm = np.linalg.norm(transformed, axis=1)
     nanson_normals = transformed/transformed_norm[:, None]
     j_nanson = J_s*transformed_norm
+    # 自洽性误差：两域法向应相反、各自归一、Nanson 法向应与当前外法向一致，两条面积比路径应相等。
     normal_error = float(np.max(np.linalg.norm(n_s+n_f, axis=1)))
     normalization_error = float(max(np.max(np.abs(np.linalg.norm(n_s, axis=1)-1.0)),
                                     np.max(np.abs(np.linalg.norm(n_f, axis=1)-1.0))))

@@ -1,4 +1,9 @@
-"""Linear cantilever, CSM1/2 and independently manufactured time validation."""
+"""Linear cantilever, CSM1/2 and independently manufactured time validation.
+
+中文说明：本模块做固体单场验证：线弹性悬臂梁（Euler--Bernoulli 近似）、CSM1/CSM2 基准
+（曲壁附着圆柱、平面应变、重力载荷，位移对照参考值）以及独立制造解的 StVK 时间收敛。
+位移单位 m，力单位 N（单位厚度）。
+"""
 
 from pathlib import Path
 import time
@@ -18,6 +23,11 @@ CSM_SOURCE = "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/c
 
 
 def temporal_solid(time_steps, *, order):
+    """半离散制造解时间验证：d=0.001*exp(-t)*mode, v=-d，固定空间、精确节点载荷。
+
+    对每个 dt 用 BDF(order) 推进到终止时刻 1，比较末端状态误差（按幅值归一）并估计
+    时间收敛阶。mode 为 sin(pi x)sin(pi y) 的 x 方向模态。
+    """
     mesh = rectangle_mesh(4)
     material = ElasticMaterial(0.1, 0.3, density=1)
     mass = assemble_mass(mesh, material)
@@ -43,6 +53,12 @@ def temporal_solid(time_steps, *, order):
 
 
 def run_solid(config, output, *, plot=True, progress=print):
+    """运行固体单场全套验证并写出报告，返回报告字典。
+
+    含线弹性悬臂梁 tip_y 收敛、CSM1/CSM2 最细网格位移对照参考值、以及 BDF1/2 时间收敛；
+    同时检查反力平衡、Jacobian 正定与非线性残差。config 需含 beam_meshes/csm_meshes/
+    time_steps 与 acceptance。
+    """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     acceptance = config["acceptance"]
@@ -60,6 +76,7 @@ def run_solid(config, output, *, plot=True, progress=print):
                           "residual": solution.relative_residual})
     write_csv(output / "beam.csv", beam_rows)
     for case, young, reference in (("CSM1", 1.4e6, [-0.007187, -0.06610]), ("CSM2", 5.6e6, [-0.0004690, -0.01697])):
+        # reference 为监测点 (0.6,0.2) 的参考位移 (tip_x, tip_y)，单位 m。
         for nx, ny in config["csm_meshes"]:
             started = time.perf_counter()
             mesh = csm_mesh(nx, ny)
@@ -85,6 +102,7 @@ def run_solid(config, output, *, plot=True, progress=print):
         write_csv(output / f"{name}.csv", rows)
     finest = [rows[-1] for rows in ([r for r in csm_rows if r["case"] == name] for name in ("CSM1", "CSM2"))]
     checks = {"beam_approximation": beam_rows[-1]["beam_relative_error"] <= acceptance["beam_relative_error_max"],
+              # 悬臂梁：参考误差须随加密单调下降，且反力须平衡（|Ry-1|<1e-8、|Rx|<1e-8）。
               "beam_errors_decrease": all(b["beam_relative_error"] < a["beam_relative_error"] for a, b in zip(beam_rows, beam_rows[1:])),
               "beam_reaction": all(abs(r["reaction_y"]-1) < 1e-8 and abs(r["reaction_x"]) < 1e-8 for r in beam_rows),
               "csm_finest_reference": all(max(r["relative_error_x"], r["relative_error_y"]) <= acceptance["csm_relative_error_max"] for r in finest),
@@ -105,6 +123,7 @@ def run_solid(config, output, *, plot=True, progress=print):
 
 
 def save_solid_plot(output, beam, csm, temporal):
+    """保存三联图 solid.png：CSM1 变形网格、参考误差随加密、时间收敛。"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

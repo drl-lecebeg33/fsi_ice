@@ -529,8 +529,15 @@ def test_review_rejection_stale_and_mixed_versions():
 def test_review_scan_evidence_matches_report():
     """Sample the frozen evidence JSON against the numbers reported in t21.md."""
     root = Path(__file__).resolve().parents[1]
-    evidence = json.loads((root/"results/m5/t21/scan_evidence.json").read_text(encoding="utf-8"))
-    smoke = json.loads((root/"results/m5/t21/fsi1_smoke.json").read_text(encoding="utf-8"))
+    evidence_path = root/"results/m5/t21/scan_evidence.json"
+    smoke_path = root/"results/m5/t21/fsi1_smoke.json"
+    # 中文：T21 证据文件位于不入库的 results/，仅存在于生成过该证据的工作区；缺失时按
+    # 既有 T23 产物门控的做法跳过，不重建或伪造证据，也不放宽任何抽样容差。
+    missing = [path.relative_to(root).as_posix() for path in (evidence_path, smoke_path) if not path.exists()]
+    if missing:
+        pytest.skip(f"local T21 evidence not present: {', '.join(missing)}")
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    smoke = json.loads(smoke_path.read_text(encoding="utf-8"))
     per_block = evidence["per_block_random_directions"]
     single = evidence["per_block_single_components"]
     paths = evidence["mesh_paths"]

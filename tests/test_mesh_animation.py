@@ -145,7 +145,8 @@ def test_export_two_frames_offline_html_and_preserve_inputs(snapshot, tmp_path, 
         for index in range(2):
             gif.seek(index)
             assert gif.info["duration"] == 1000
-    html = (tmp_path/"output/index.html").read_text()
+    # 中文：导出页面固定为 UTF-8，显式指定编码，避免中文 Windows 上按 GBK 读取失败。
+    html = (tmp_path/"output/index.html").read_text(encoding="utf-8")
     assert "0.01 s → 0.02 s" in html
     assert "data:image/gif;base64," in html
     assert "https://" not in html

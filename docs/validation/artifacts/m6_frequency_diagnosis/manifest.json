@@ -1,0 +1,14 @@
+{
+  "scope": "Completed diagnostics only; two FSI2 refinements RUNNING, no final results yet",
+  "source_sha256": "6792c3e517e1e8ba5af74ab20a6423943a2b7d39e0604595f844c537f2f46023",
+  "baseline_checkpoint_sha256": "d86b3e1bd56a0973319fb116d9da162ea134dc7d870bdaac7c6df59fa75e35f9",
+  "files": {
+    "check_frequency_extraction.py": "fbbf10079aa558bd6ed3ccfef6a0a9f6944d91c232b8d37db12f453993dc1f47",
+    "check_solid_compliance.py": "7d9f33b56bf689ffa0f7ac69e5baad3cb585000c920f8d59534f7841969e6f36",
+    "check_solid_modes.py": "33fa4ef6d2706dddcf8bf8af0a8675907dbc2dbd26398e61f12bacb75983e7c8",
+    "frequency_extraction.json": "79abb13997d8681f895e9314570e983ac0d741bb8e28e0bbdb1c0fc3f4fa1d7d",
+    "solid_compliance.json": "39f2fa1da12abc9f5617d83d305fc30af275785322b330799bc6794ddabaeb0f",
+    "solid_modes.json": "6b469a45cce72ef3d6a85e80a5031abd95647069b91ff02d45c52a9e4ee0405c",
+    "verification.json": "20cc52c2c8e18d1f5e6c58348f234114b4882127d32d0a4f535912ecd997df27"
+  }
+}

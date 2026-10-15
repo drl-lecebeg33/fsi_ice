@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "started_utc": "2026-10-14T13:03:04.198408+00:00",
+  "source_digest": "cb58278f3dbde144477824b9e5e0c4db04f0935a8f37d31ffac20b452597cf27",
+  "config_sha256": "ab4460e8f1525e576ce72eee976120c20829cb1be315d16286a6c2bcda777047",
+  "solver_pid": 1138126,
+  "from_zero": true,
+  "threads": 1,
+  "concurrent_runs": true,
+  "fair_timing_evidence": false,
+  "validated_by": "743 passed, 2 skipped; 10 fine-grid diagnostic steps, 5 time-grid diagnostic steps, 3-step fresh runs for all configs, supervisor integration passed",
+  "command": [
+    "/home/iceberg/\u684c\u9762/tmp/fsi_ice/.venv/bin/python",
+    "-u",
+    "-m",
+    "fsi_ice",
+    "fsi2",
+    "--config",
+    "results/m6/frequency_accuracy_mesh15/space_half/config.json",
+    "--output",
+    "results/m6/frequency_accuracy_mesh15/space_half/trajectory"
+  ],
+  "solver_exit_code": 0,
+  "finished_utc": "2026-10-14T18:56:24.376578+00:00",
+  "analysis_exit_code": 0,
+  "accepted_steps": 1200,
+  "accepted_time": 11.999999999999789,
+  "target_time_complete": true,
+  "accepted_physics_passed": true,
+  "solver_failure": null
+}

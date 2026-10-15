@@ -1,0 +1,17 @@
+{
+  "solver_source_sha256": "7590751f6107bcc4d6d05bbcb3f7ea8cb70f340cd476df7563c1e1e85969c3a6",
+  "analysis_source_sha256": "6792c3e517e1e8ba5af74ab20a6423943a2b7d39e0604595f844c537f2f46023",
+  "files": {
+    "comparison.json": "8484afb826d9eadb8dce30f221e265c041b803cd28a204a09847b18b7554134f",
+    "cycles.csv": "94e08b34716a9839ed5c081dfe49cbc05e2b5e21b4f13b4e23de0d3a295cbe74",
+    "cycles.png": "0e3db6d479810271b8cd16faf167e9270a460c10b932fa782ab7bcdcdcc44d76",
+    "history.png": "bf6c293e96c3b70332e3d4b8f19b728abd4fc99050d2a7487191dda6fdb860dc",
+    "report_original.json": "bfcf3084485f849bc8e70e4357c22a6a60879f89d70c70333ffab55dfc5f2901",
+    "summary_corrected.json": "f7337e102d588a29b37ee96909de3e7a9be59339e6f4fdf2d660f5c53b27278d",
+    "summary_corrected.md": "a5842b56fbc2d4b9949a820d8da54ff8dbd7906c938d5d145ed0a62df8aa8027",
+    "summary_original.md": "ea352f4e01b9e6cfe4af31aa8dce629d4c52851cb6ca9ec360ac3bd9e80ec37d",
+    "verification.json": "4343243524814aa729f94a0ed8fe6e29176c4ebcbb81de74da58af0ebd5f2742"
+  },
+  "csv_original_sha256": "2ba8566a46a781707d50236d6ecd1723eecf44763c127ff6cf48f089c7fb6e0f",
+  "csv_normalization": "CRLF normalized to LF; numeric values unchanged"
+}

@@ -1,0 +1,26 @@
+{
+  "scope": "Diagnostic dry linear beam only; not a standard FSI2 solution or acceptance test",
+  "records": [
+    {
+      "h": 0.02,
+      "vertical_force_n": 0.9999999999999996,
+      "tip_y_compliance_m_per_n": 0.007435659218368774,
+      "total_solid_mass_kg": 70.1010205144336,
+      "relative_free_residual": 3.885609406215957e-11
+    },
+    {
+      "h": 0.01,
+      "vertical_force_n": 0.9999999999999996,
+      "tip_y_compliance_m_per_n": 0.011756588851387495,
+      "total_solid_mass_kg": 70.07085130051348,
+      "relative_free_residual": 2.6766000951309717e-10
+    },
+    {
+      "h": 0.005,
+      "vertical_force_n": 0.9999999999999996,
+      "tip_y_compliance_m_per_n": 0.012643565546616654,
+      "total_solid_mass_kg": 70.06843306090364,
+      "relative_free_residual": 8.570931033437148e-10
+    }
+  ]
+}

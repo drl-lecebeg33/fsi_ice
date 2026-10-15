@@ -1,0 +1,38 @@
+{
+  "snapshot_utc": "2026-10-13T12:03:15.262658+00:00",
+  "scope": "Diagnostic checks and accepted-prefix snapshots only; full refinements still RUNNING",
+  "source_sha256": "6792c3e517e1e8ba5af74ab20a6423943a2b7d39e0604595f844c537f2f46023",
+  "modal_and_static_algebra_checks_passed": true,
+  "independent_frequency_checks_passed": true,
+  "watcher_completion_smoke_passed": true,
+  "runs": {
+    "time_half": {
+      "snapshot_accepted_steps": 94,
+      "snapshot_time": 0.4700000000000003,
+      "status": "RUNNING",
+      "prefix_physics_passed": true,
+      "only_changed_field": "dt",
+      "physical_extrema": {
+        "residual": 4.927672847543363e-08,
+        "continuity": 2.2555695868280907e-11,
+        "minimum_quality": 0.7284403311276996,
+        "minimum_cell_determinant": 4.727300779426388e-05,
+        "minimum_solid_jacobian": 0.9995680164423126
+      }
+    },
+    "space_half": {
+      "snapshot_accepted_steps": 27,
+      "snapshot_time": 0.2700000000000001,
+      "status": "RUNNING",
+      "prefix_physics_passed": true,
+      "only_changed_field": "mesh_size",
+      "physical_extrema": {
+        "residual": 1.2845470964695238e-08,
+        "continuity": 7.85094278189246e-13,
+        "minimum_quality": 0.7617623341899947,
+        "minimum_cell_determinant": 1.0748613715966702e-05,
+        "minimum_solid_jacobian": 0.999738068147909
+      }
+    }
+  }
+}

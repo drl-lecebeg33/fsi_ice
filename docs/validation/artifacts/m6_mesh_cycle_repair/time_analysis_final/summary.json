@@ -1,0 +1,267 @@
+{
+  "schema": "m6-analysis-v1",
+  "status": "INCOMPLETE",
+  "reason": "Periodic response has not stabilized",
+  "config": {
+    "case": "fsi2",
+    "mesh_size": 0.02,
+    "dt": 0.005,
+    "end_time": 12.0,
+    "order": 2,
+    "method": "iqn",
+    "fluid": {
+      "density": 1000.0,
+      "dynamic_viscosity": 1.0,
+      "mean_velocity": 1.0
+    },
+    "solid": {
+      "density": 10000.0,
+      "poisson": 0.4,
+      "young": 1400000.0,
+      "thickness": 1.0
+    },
+    "coupling": {
+      "relaxation": 0.5,
+      "absolute_tolerance": 1e-13,
+      "relative_tolerance": 1e-12,
+      "max_iterations": 160,
+      "iqn_initial_relaxation": 0.5,
+      "iqn_alpha_max": 10.0,
+      "iqn_history_size": 10,
+      "iqn_restart_tolerance": 1.0
+    },
+    "solver": {
+      "single_field_tolerance": 1e-10,
+      "newton_atol": 1e-10,
+      "newton_rtol": 1e-12,
+      "max_iterations": 40
+    },
+    "acceptance": {
+      "residual_max": 1e-07,
+      "continuity_max": 1e-10,
+      "minimum_mesh_quality": 0.1,
+      "period_variation_max": 0.02,
+      "amplitude_variation_max": 0.02,
+      "mean_variation_max": 0.02,
+      "tip_y_amplitude_relative_max": 0.1,
+      "frequency_relative_max": 0.05,
+      "drag_mean_relative_max": 0.1
+    },
+    "reference": {
+      "tip_y_amplitude": 0.0816,
+      "frequency": 1.93,
+      "drag_mean": 215.06
+    },
+    "provenance": {
+      "verified_on": "2026-10-12",
+      "table": "FSI2 4+0, source labels timestep 0.0005",
+      "url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+      "definition_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+      "force": "cylinder plus beam, per unit depth",
+      "reference_time_integrator": "not asserted to match project BDF",
+      "status": "reference targets; project periodic validation pending"
+    },
+    "mesh_motion": {
+      "model": "weighted_harmonic",
+      "length": 0.005,
+      "power": 1.0
+    }
+  },
+  "identity": {
+    "solver_source_sha256": "16306679ecf6fc1a4b540fee88bf227a67e62b9a623732d285072f32a7cf9e8a",
+    "analysis_package_sha256": "cb58278f3dbde144477824b9e5e0c4db04f0935a8f37d31ffac20b452597cf27",
+    "mesh_sha256": "e0f96b40f0cdacdf0ca7bbc789b88b651a3c5a7b4a51a5796a6a02501ad7c666",
+    "checkpoint_sha256": "36566d5ac6b37b0ecde1fb6b5ee336e436d2f3f913f2d5bb47bf464af57bb7f2",
+    "analysis_script_sha256": "ac49f54184558662c5eec42ffbc99626984b8171b0abc317742a2a4ee1448fca",
+    "input_directory": "/home/iceberg/桌面/tmp/fsi_ice/results/m6/frequency_accuracy_precision/time_half",
+    "identity_scope": "Stored solver identity and array integrity; analysis does not resume a solver."
+  },
+  "accepted_steps": 2400,
+  "accepted_time": 12.000000000000476,
+  "target_steps": 2400,
+  "target_time_complete": true,
+  "accepted_physics_passed": true,
+  "periodic_status": "INCOMPLETE",
+  "periodic": {
+    "status": "INCOMPLETE",
+    "reason": "Periodic response has not stabilized",
+    "statistics": {
+      "tip_y": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 2.199212458634324,
+        "amplitude": 0.07448371671545527,
+        "mean": 0.0010501360412808953,
+        "period_variation": 0.0005383133531170752,
+        "amplitude_variation": 0.0008283446981672932,
+        "mean_variation": 0.0005067905265785648,
+        "waveform_variation": 0.0050084697518933035,
+        "cycle_boundaries": [
+          10.51009080032395,
+          10.964933578966765,
+          11.419617481108626,
+          11.874215484240551
+        ],
+        "window": [
+          10.51009080032395,
+          11.874215484240551
+        ]
+      },
+      "drag": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 2.199212458634324,
+        "amplitude": 89.62268262787859,
+        "mean": 194.96819705657185,
+        "period_variation": 0.0005383133531170752,
+        "amplitude_variation": 0.0007960255448551725,
+        "mean_variation": 0.00012030498797092845,
+        "waveform_variation": 0.020033916333246027,
+        "cycle_boundaries": [
+          10.51009080032395,
+          10.964933578966765,
+          11.419617481108626,
+          11.874215484240551
+        ],
+        "window": [
+          10.51009080032395,
+          11.874215484240551
+        ]
+      },
+      "lift": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 2.199212458634324,
+        "amplitude": 300.6885978023455,
+        "mean": 2.9466129648526063,
+        "period_variation": 0.0005383133531170752,
+        "amplitude_variation": 0.012497521457690643,
+        "mean_variation": 0.00044889978451926525,
+        "waveform_variation": 0.029548057085795772,
+        "cycle_boundaries": [
+          10.51009080032395,
+          10.964933578966765,
+          11.419617481108626,
+          11.874215484240551
+        ],
+        "window": [
+          10.51009080032395,
+          11.874215484240551
+        ]
+      }
+    },
+    "independent_peak_statistics": {
+      "tip_y": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 2.199212458634324,
+        "amplitude": 0.07448371671545527,
+        "mean": 0.0010501360412808953,
+        "period_variation": 0.0005383133531170752,
+        "amplitude_variation": 0.0008283446981672932,
+        "mean_variation": 0.0005067905265785648,
+        "waveform_variation": 0.0050084697518933035,
+        "cycle_boundaries": [
+          10.51009080032395,
+          10.964933578966765,
+          11.419617481108626,
+          11.874215484240551
+        ],
+        "window": [
+          10.51009080032395,
+          11.874215484240551
+        ]
+      },
+      "drag": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 4.4018760079547254,
+        "amplitude": 89.3597262097348,
+        "mean": 194.9481552812109,
+        "period_variation": 0.002019638599053742,
+        "amplitude_variation": 0.0028594852666240424,
+        "mean_variation": 0.00013800958058828546,
+        "waveform_variation": 0.08746154853802422,
+        "cycle_boundaries": [
+          11.17983827090261,
+          11.406865036528785,
+          11.634344861290609,
+          11.861365872901994
+        ],
+        "window": [
+          11.17983827090261,
+          11.861365872901994
+        ]
+      },
+      "lift": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 6.600198639465818,
+        "amplitude": 171.19355868643302,
+        "mean": 19.17953190879732,
+        "period_variation": 0.5362642301962144,
+        "amplitude_variation": 0.10874358400193439,
+        "mean_variation": 1.2857790974135819,
+        "waveform_variation": 2.689909330114841,
+        "cycle_boundaries": [
+          11.476953602376975,
+          11.639839256644667,
+          11.745037461424005,
+          11.931485376930173
+        ],
+        "window": [
+          11.476953602376975,
+          11.931485376930173
+        ]
+      }
+    },
+    "cycle_definition": "Common tip-y peak-to-peak physical cycles; force frequencies here are cycle rates, not spectral peaks",
+    "waveform_variation_limit": 0.02,
+    "checks": {
+      "stable": false
+    }
+  },
+  "reference_comparison": {
+    "tip_y_amplitude": {
+      "value": 0.07448371671545527,
+      "reference": 0.0816,
+      "relative_error": 0.08720935397726393,
+      "limit": 0.1,
+      "provisional": true
+    },
+    "frequency": {
+      "value": 2.199212458634324,
+      "reference": 1.93,
+      "relative_error": 0.1394883205359192,
+      "limit": 0.05,
+      "provisional": true
+    },
+    "drag_mean": {
+      "value": 194.96819787614692,
+      "reference": 215.06,
+      "relative_error": 0.09342417057497021,
+      "limit": 0.1,
+      "provisional": true
+    }
+  },
+  "solver_failure": null,
+  "physical_extrema": {
+    "residual": 9.996553762547933e-08,
+    "continuity": 1.7674110417862874e-17,
+    "minimum_quality": 0.4744886641836596,
+    "minimum_cell_determinant": 2.5503270975877746e-05,
+    "minimum_solid_jacobian": 0.9499559923581896
+  },
+  "work": {
+    "fluid_solves": 36018,
+    "solid_solves": 36018,
+    "newton_iterations": 113428,
+    "linear_solves": 126016,
+    "coupling_iterations": 28818,
+    "iqn_updates": 24018,
+    "iqn_restarts": 0,
+    "accepted_solve_seconds": 10451.462820600835,
+    "fair_timing_evidence": false,
+    "scope": "Accepted step solves only; excludes setup, output and failed attempts. Concurrent activity and repeatability are not certified."
+  }
+}

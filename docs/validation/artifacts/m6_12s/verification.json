@@ -1,0 +1,39 @@
+{
+  "solver_report_status": "INCOMPLETE",
+  "solver_source_sha256": "7590751f6107bcc4d6d05bbcb3f7ea8cb70f340cd476df7563c1e1e85969c3a6",
+  "steps": 1200,
+  "time": 11.999999999999789,
+  "checks": {
+    "target_complete": true,
+    "resumed_steps_1000": true,
+    "accepted_steps_1200": true,
+    "new_steps_200": true,
+    "prefix_exactly_preserved": true,
+    "ledger_order": true,
+    "original_10s_unchanged": true,
+    "solver_source_matches_frozen": true,
+    "solution_matches_checkpoint": true,
+    "no_solver_failure": true,
+    "accepted_physics_passed": true
+  },
+  "all_1200_steps": {
+    "max_residual": 9.369310882689774e-08,
+    "max_continuity": 3.23587540431586e-12,
+    "min_area_ratio": 0.36390505779025595,
+    "min_quality": 0.4772271135677031,
+    "min_solid_jacobian": 0.9538154478568338,
+    "solve_seconds": 5361.058244220301,
+    "coupling_evaluations": 20733,
+    "iqn_restarts": 436
+  },
+  "new_200_steps": {
+    "max_residual": 9.369310882689774e-08,
+    "max_continuity": 1.1972366983874598e-13,
+    "min_area_ratio": 0.36390505779025595,
+    "min_quality": 0.4772271135677031,
+    "min_solid_jacobian": 0.9538154478568338,
+    "solve_seconds": 879.2594313599693,
+    "coupling_evaluations": 2783,
+    "iqn_restarts": 6
+  }
+}

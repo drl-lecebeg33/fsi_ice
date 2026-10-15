@@ -1,0 +1,27 @@
+{
+  "source_digest": "cb58278f3dbde144477824b9e5e0c4db04f0935a8f37d31ffac20b452597cf27",
+  "scope": "Completed 12-second IQN stage; space_half PASS, two coarse-grid cases INCOMPLETE; not full M6 convergence or algorithm-cost certification",
+  "files": {
+    "baseline/config.json": "0154244f4a8bd46e550f3c6b72a0bb94ecfe1299711b1181969caeb649acee73",
+    "baseline/experiment.json": "56f429a1c6938de8989dad0c8bcba0345ea943ba7670e0ad1bceaff533531c3e",
+    "baseline/monitor.csv": "1c95cfac4e5183ceb8a78c18db2da9beca32914ab1390d933e51b98c21e5de69",
+    "baseline/report.json": "38be9fbf69e7f8b4c4f610c8213692b9830f29840baac5e4b666c297f5b3a3b4",
+    "baseline/summary.json": "86ee873e3bda84dae397d968a0d7dff44f89023c409fa6e92859403026b24470",
+    "baseline/summary.md": "bc25810897be2e5f9a9a1e9fb9696c411dbdc01fb0da60089863426286cf69e6",
+    "comparison.json": "dc49cbd7c5240e12a70433f039c57e4cf643c710938539e9a8fd06558d8123cd",
+    "space_half/config.json": "ab4460e8f1525e576ce72eee976120c20829cb1be315d16286a6c2bcda777047",
+    "space_half/cycles.png": "736e04f68666ba369feec895d6d08893841406d97f995415c10e52056fde7972",
+    "space_half/experiment.json": "7e5172e1fda01cd5677a2a2cb257d406c74f3bf49d85822f9ed79a5774285f7a",
+    "space_half/history.png": "d547113810cda047ab7f1f33fa5ee97655a50ffb39dab92e28b83b2af839c7b1",
+    "space_half/monitor.csv": "9903b2e4554cf0cc6d390f8f056e140ad922df883998d7f16ca5d384061365b8",
+    "space_half/report.json": "d59b8f6802d7ec049bca27129cfa52f899cbfdf05e65dfc7d0de880bc0721fd0",
+    "space_half/summary.json": "c6d0f734917fd005b637d2393adbd6b326f77da13aa4e1fc3796f83dd1832c9d",
+    "space_half/summary.md": "14a6bedb9f957c927950d83855989197a4a48c9c5daf6f5f6704b634d5e15d96",
+    "time_half/config.json": "0e0aa413f9fb6a6dab7c3a8b3f47ce47507cc7296aa1b965ffc5f10287475f35",
+    "time_half/experiment.json": "9162e2c4cda95292fcf5fe1cdd44a610381f1115259670c2c5eb08c045dc7c66",
+    "time_half/monitor.csv": "5109fe9739335f0483f89ae1948e67559f5f931f112382752d0ca8d1486d62c3",
+    "time_half/report.json": "67885e5aae5da52c0b2cda26b5db56d4ac537887379586e8c4fe74dcb51e40c3",
+    "time_half/summary.json": "c7fd1447161f23bc52b2da0d02a03b3156147a85943f5e95aff5d5c0f002f915",
+    "time_half/summary.md": "91a5f5f4e88d56437cafe31c822938511c21f8d8077d5d2bf5a605f89d12798c"
+  }
+}

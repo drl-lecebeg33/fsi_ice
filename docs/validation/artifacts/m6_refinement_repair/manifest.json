@@ -1,0 +1,24 @@
+{
+  "scope": "Isolated failure repair verification; full 12 s new-source runs still RUNNING",
+  "source_digest": "e59c9b7c293921b3d649cead5d8d0f355095913bfc01d4ecf5f145b249112d1d",
+  "full_tests": "719 passed, 2 skipped in 222.23s",
+  "files": {
+    "full_tests.log": "25274239f70b0f64d25a7e8253b24ca3b30022af441e999bfb61095e6201cebf",
+    "identity.json": "ae395c3b00605cd9b197732ddc991bf57ceead98f5d6b18156b1c48b5797d690",
+    "related_tests.log": "2e3ff46a4baec0f7e4e129f998e4f619d3b08cb04b0aa020202c7950bc0df4f6",
+    "replay.py": "06bc913006fecc91bf4a320d27975463e29def4f4f17f68f8bf5eca3049d0050",
+    "space_half_fixed_iterations.json": "02c87f8fcefbe6354fe668192492668f775ba15038a93aa30772b4a48ad76016",
+    "space_half_fixed_result.json": "b694878c616624b9582fbe67ab34e40df5bfa966c5b0ce2019be9bd475a0da43",
+    "space_half_followup_iterations.json": "cb71cf648109e8104b0d5ff714a521c4009a3a20d3dae90f7c1d0a634a7feb6c",
+    "space_half_followup_result.json": "8bddc2bc23476cf08894c30107cd81526e88780c6c83cf98d1f609f7e3b03395",
+    "space_half_original_iterations.json": "1ec96cd652c8651d315823923bb08575258d79531550972816486705bcd33b0d",
+    "space_half_original_result.json": "2740dbe2e63c9d9d5f5e9b41780f090757ab632a643b4a7f553c7b97f8cf13f4",
+    "time_half_fixed_iterations.json": "c1861c3b62fcf90fbb3abc6c5fceeed93dfc6075485645096bd1bd4516066d3e",
+    "time_half_fixed_result.json": "d80b4245760241046be0dac428d7872edebbdb3c5f7f948f34e059899cb6ff0c",
+    "time_half_followup_iterations.json": "c2c8791f7350c56ac7a3a97eefe0360b5303a25d58af37c46cc306105a83ea71",
+    "time_half_followup_result.json": "4fd61d623a1e1d6aeb2d8ed8200c73b7f1d7bdc0f60560cb54ad74ffb1766725",
+    "time_half_original_iterations.json": "b1a0b630d4eb079dd2b54433901bfe1369df0130bd2b871e2c94a2f01769ce3a",
+    "time_half_original_result.json": "c38c97295db81dd25c68354b3e86d2fd6115833037b270b388e37aad40f2a4e2",
+    "verification.json": "7cc5e93235756bd793baaefff2689d8b8449d0f9930f486a832344bfe4486bcc"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "scope": "Independent extraction on baseline only; no new physical solve",
+  "window": [
+    10.50999999999982,
+    11.999999999999789
+  ],
+  "harmonic_least_squares_frequency_hz": 2.1842863628198037,
+  "rising_mean_crossing_frequency_hz": 2.184363040557951,
+  "crossing_times_s": [
+    10.919390870562726,
+    11.377183981141828,
+    11.834989588754341
+  ],
+  "least_squares_rms_m": 0.0001008883638795239,
+  "production_peak_frequency_hz": 2.1841817795361025,
+  "reference_frequency_hz": 1.93
+}

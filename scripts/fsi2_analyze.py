@@ -128,18 +128,18 @@ def markdown(summary):
             f"{result['relative_error']:.3%} | {result['limit']:.1%} | {result['provisional']} |")
     if not summary["reference_comparison"]:
         lines.append("| No resolved tip-motion window | — | — | — | — | True |")
-    lines += ["", "| Signal | Window (s) | Frequency (Hz) | Amplitude | Mean | "
-              "Period / amplitude / mean variation |", "| --- | --- | ---: | ---: | ---: | --- |"]
+    lines += ["", "| Signal | Window (s) | Physical cycle rate (Hz) | Amplitude | Mean | "
+              "Period / amplitude / mean / waveform variation |", "| --- | --- | ---: | ---: | ---: | --- |"]
     for name, stats in summary["periodic"].get("statistics", {}).items():
         if stats.get("resolved"):
             lines.append(f"| {name} | {stats['window'][0]:.5f}–{stats['window'][1]:.5f} | "
                 f"{stats['frequency']:.7g} | {stats['amplitude']:.7g} | {stats['mean']:.7g} | "
-                f"{stats['period_variation']:.3%} / {stats['amplitude_variation']:.3%} / {stats['mean_variation']:.3%} |")
+                f"{stats['period_variation']:.3%} / {stats['amplitude_variation']:.3%} / {stats['mean_variation']:.3%} / {stats.get('waveform_variation', 0):.3%} |")
         else:
             lines.append(f"| {name} | Insufficient complete cycles | — | — | — | — |")
     if summary["solver_failure"]:
         lines += ["", "Solver failure: "+summary["solver_failure"]["reason"]]
-    lines += ["", "Units: tip displacement m, drag/lift N/m, frequency Hz. Amplitude is half peak-to-peak.",
+    lines += ["", "Units: tip displacement m, drag/lift N/m, frequency Hz. Amplitude is half peak-to-peak. All signals use tip-y physical cycles; force cycle rates are not dominant spectral frequencies.",
         "", "Work totals cover accepted solves only; these timings cannot establish an algorithm ranking.",
         "", "```json", json.dumps(summary["work"], indent=2), "```", ""]
     return "\n".join(lines)
@@ -201,7 +201,7 @@ def analyze_directory(folder, output):
     (output/"cycles.png").unlink(missing_ok=True)
     plot_history(rows, summary, output)
     columns = ("signal", "resolved", "cycles", "frequency", "amplitude", "mean",
-               "period_variation", "amplitude_variation", "mean_variation", "window_start", "window_end")
+               "period_variation", "amplitude_variation", "mean_variation", "waveform_variation", "window_start", "window_end")
     with (output/"cycles.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()

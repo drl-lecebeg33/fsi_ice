@@ -116,9 +116,10 @@ class TransientFSI:
         flow_initial = np.r_[view.base.velocity.ravel(), view.base.pressure]
         linear_solver = ReusedLUSolver(velocity_dofs=self.layout.size_of("u_f"),
                                        density=self.density, reuse_across_candidates=True)
+        inner_factor, inner_refinements = 1.0, 0
 
         def evaluate(displacement):
-            nonlocal flow_initial
+            nonlocal flow_initial, inner_factor, inner_refinements
             ds = displacement.reshape(solid.points.shape)  # 拉直界面量恢复为 (节点数,2) 位移
             # 由 BDF 系数与历史项直接给出固体速度（瞬时运动学关系）
             vs = view.solid_context.coefficient*ds + view.solid_context.history_term[0]
@@ -139,7 +140,8 @@ class TransientFSI:
             solution = solve_flow_step(operators, prescribed[nodes], view.fluid_context,
                 tags=tags, pressure_pin=None, ale_context=ale,
                 initial=flow_initial, linear_solver=linear_solver,
-                tolerance=tolerance, absolute_tolerance=fluid_absolute, max_iterations=max_iterations)
+                tolerance=tolerance, absolute_tolerance=(None if fluid_absolute is None else
+                    inner_factor*fluid_absolute), max_iterations=max_iterations)
             flow_initial = np.r_[solution.velocity.ravel(), solution.pressure]
             interface = evaluate_interface_geometry(topology, geometry.current_mesh, operators.space, ds,
                                                      candidate_id=context.candidate_id)
@@ -147,19 +149,38 @@ class TransientFSI:
                                             thickness=self.material.thickness)
             external = np.zeros(2*solid.n_nodes)
             external[topology.solid_dofs] = load.f_s_gamma  # 界面牵引装配为固体外力
+            ds_scales = self.scales[self.layout.slice_of("d_s")]
+            input_threshold = options.absolute_tolerance + options.relative_tolerance*float(
+                np.max(np.abs(displacement/ds_scales)))
+            correction_tolerance = (max(100*inner_factor*input_threshold*float(np.min(ds_scales)),
+                                        np.finfo(float).tiny) if inner_refinements else None)
             state, solid_result = solve_solid_step(solid, self.material, external, self.solid_nodes,
                 view.solid_context, initial=ds, tolerance=tolerance,
-                absolute_tolerance=solid_absolute, max_iterations=max_iterations)
+                absolute_tolerance=solid_absolute, correction_tolerance=correction_tolerance,
+                max_iterations=max_iterations)
             counts["fluid_solves"] += 1
             counts["solid_solves"] += 1
             # 合并两场 Newton 迭代数（各自历史首行为初值，故各减 1）
             iterations = len(solution.nonlinear_history)+len(solid_result.nonlinear_history)-2
             counts["newton_iterations"] += iterations
-            counts["linear_solves"] += iterations
+            counts["linear_solves"] += len(solution.nonlinear_history)-1+solid_result.linear_solves
             # 组装本候选的完整块向量 x（与 layout 分块一致）
             x = self.layout.pack({"u_f": solution.velocity, "p_f": solution.pressure,
                 "d_s": ds, "v_s": vs, "d_m": dm,
                 "g": load.g_f_gamma.reshape(self.layout.shape_of("g"))})
+            # An inexact field solve can leave a noisy map near the much tighter
+            # displacement gate. Refine at the same input, at most three decades
+            # per step. For the solid certify displacement correction accuracy;
+            # forcing ever smaller force residuals can hit a roundoff floor.
+            gap = float(np.max(np.abs((state[0].ravel()-displacement)/ds_scales)))
+            magnitude = max(float(np.max(np.abs(displacement/ds_scales))),
+                            float(np.max(np.abs(state[0].ravel()/ds_scales))))
+            threshold = options.absolute_tolerance + options.relative_tolerance*magnitude
+            if threshold < gap <= 1000*threshold and inner_refinements < 3 and \
+                    fluid_absolute is not None and solid_absolute is not None:
+                inner_factor *= .1
+                inner_refinements += 1
+                return evaluate(displacement)
             # 返回 G(x)：target 为固体新位移，fluid 位置暂存打包块向量 x
             return PartitionedEvaluation(state[0].ravel(), x, load, state)
 
@@ -184,6 +205,7 @@ class TransientFSI:
             "coupling_iterations": len(result.history),
             "iqn_updates": sum(row.relaxation_reason == "iqn" for row in result.history),
             "iqn_restarts": sum(row.relaxation_reason == "iqn_restart" for row in result.history),
+            "inner_refinements": inner_refinements,
             "interface_residual": result.history[-1].residual_norm,
             "relaxation": result.history[-1].relaxation}
 

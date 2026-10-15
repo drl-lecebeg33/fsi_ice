@@ -1,0 +1,7 @@
+{
+  "scope": "Geometry-only fixture; checkpoint927 boundary shape, scaled shapes are synthetic stress cases",
+  "checkpoint_sha256": "a68826fb0bae9238da52b87ac4018a739851bbb780236ab1cc97cabcb08275e6",
+  "files": {
+    "space927.npz": "226d0fbdf2a6888cbe095ae79cb1616b6843321ae4c622d0a7fc8d00005d1b13"
+  }
+}

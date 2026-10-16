@@ -1,0 +1,66 @@
+{
+  "scope": "Dry, undeformed, small-strain solid eigenmodes: diagnostic only, not FSI2 frequencies or physical acceptance",
+  "source_digest": "6792c3e517e1e8ba5af74ab20a6423943a2b7d39e0604595f844c537f2f46023",
+  "material": {
+    "young": 1400000.0,
+    "poisson": 0.4,
+    "density": 10000.0,
+    "model": "plane_strain"
+  },
+  "records": [
+    {
+      "h": 0.02,
+      "solid_nodes": 113,
+      "solid_cells": 148,
+      "fluid_nodes": 1139,
+      "fluid_cells": 2091,
+      "clamp_nodes": 3,
+      "frequencies_hz": [
+        0.4466157193507495,
+        2.7264451355321375,
+        7.338828610560736
+      ],
+      "eigen_residuals_relative": [
+        1.0211268716895289e-09,
+        2.8004300669226805e-11,
+        3.6349748852680387e-12
+      ]
+    },
+    {
+      "h": 0.01,
+      "solid_nodes": 444,
+      "solid_cells": 734,
+      "fluid_nodes": 4224,
+      "fluid_cells": 8078,
+      "clamp_nodes": 7,
+      "frequencies_hz": [
+        0.3558299065217914,
+        2.1889253405994595,
+        5.957238736494665
+      ],
+      "eigen_residuals_relative": [
+        8.662748288889304e-09,
+        2.2344012313703023e-10,
+        3.2471666404661574e-11
+      ]
+    },
+    {
+      "h": 0.005,
+      "solid_nodes": 1516,
+      "solid_cells": 2730,
+      "fluid_nodes": 16038,
+      "fluid_cells": 31341,
+      "clamp_nodes": 11,
+      "frequencies_hz": [
+        0.3428987994408113,
+        2.1103918946146076,
+        5.753561671577628
+      ],
+      "eigen_residuals_relative": [
+        4.624253391922412e-08,
+        1.242537236003577e-09,
+        1.6018326818669604e-10
+      ]
+    }
+  ]
+}

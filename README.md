@@ -1,6 +1,8 @@
 # fsi_ice
 
-最新进展（2026-10-13）：按用户选定的10 s终点，当前加权网格IQN源码已从零连续接受1000步，正式越过第923步旧失败点；全程物理与网格门槛通过。末段梁尖振幅变化30.9%，周期仍INCOMPLETE，M6未完成。见[10秒重跑验证](docs/validation/m6_10s_run.md)。
+阶段收尾（2026-10-15）：三组新权重实验均完成12秒；细网格IQN算例PASS，主频/振幅/平均阻力参考误差分别1.52%/1.08%/6.36%。基线和时间细化仍为周期INCOMPLETE。全量743 passed/2 skipped；本轮按用户要求收尾，独立收敛与四算法比较列为后续研究，不再启动新计算，完整M6未完成。[最终交付与证据](docs/validation/m6_stage_close.md)。
+
+最新进展（2026-10-13）：已从10秒正式断点续算到12秒，共接受1200步，全程物理门槛通过。修复周期均值积分的采样边界误差后，IQN周期已稳定；主频2.18418 Hz相对参考偏高13.170%，总体FAIL，M6未完成。当前源码全量712 passed/2 skipped，下一阶段两个单变量细化配置已准备但未运行。见[12秒续算与统计修复验证](docs/validation/m6_12s_run.md)。
 
 上一工作包（2026-10-13）：M6 动网格修复与性能重写本轮已完成并留证：新加权网格IQN轨迹越过旧第825步停止点（接受922步/9.22 s）后在第923步因全残差门控如实失败；公平三重复计时中位加速2.905×；最终源码全量回归704 passed/2 skipped。旧8.24秒失败数据只读保留，物理和网格门槛不变，M6仍未完成。证据见 [修复验证](docs/validation/m6_repair_performance.md)，方案见 [修复计划](docs/development/m6_repair_performance_plan.md)。
 
@@ -30,6 +32,7 @@
 - [M6 IQN 瞬态接入与公式修正](docs/validation/m6_iqn_transient.md)
 - [M6 第923步故障诊断与分区停止条件修复](docs/validation/m6_physical_gate.md)
 - [M6 当前源码10秒正式重跑](docs/validation/m6_10s_run.md)
+- [M6 12秒续算与周期积分窗口修复](docs/validation/m6_12s_run.md)
 - [M6 长时实验与完整历史续算](docs/validation/m6_long_run.md)
 
 T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格最细结果的梁尖 y 位移误差 4.076%、阻力误差 0.394%，满足 5% 门槛；完整场、迭代和失败证据可由配置重复生成。
@@ -197,7 +200,7 @@ T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格�
 
 包安装后，`python -m fsi_ice` 或控制台命令 `fsi-ice` 均可从其他目录运行；此时配置和输出路径按当前工作目录解释。`test` 为开发入口，需要保留本地项目及测试目录。
 
-当前源码全量回归 **707 项通过、2 项跳过**（185.76 s，2026-10-13；见[本轮验证](docs/validation/m6_physical_gate.md)）；此前动网格修复源码为704项通过、2项跳过（日志 `results/m6/repair/full_tests_final.log`）。两个跳过为既有可选FSI1整体冒烟与T23历史产物检查。完整历史续算的648项基线及真实网格连续4步与2+2分段恢复末态逐数组相同证据见 [长时与续算记录](docs/validation/m6_long_run.md)；独立后处理/研究准备新增26项，相关98项实际通过，见 [后处理记录](docs/validation/m6_postprocess.md)。
+当前源码全量回归 **743 项通过、2 项跳过**（2026-10-15 提交前复跑；见[阶段收尾记录](docs/validation/m6_stage_close.md)与[提交前日志](docs/validation/artifacts/m6_stage_close/final_full_tests.log)）；此前动网格修复源码为704项通过、2项跳过（日志 `results/m6/repair/full_tests_final.log`）。两个跳过为既有可选FSI1整体冒烟与T23历史产物检查。完整历史续算的648项基线及真实网格连续4步与2+2分段恢复末态逐数组相同证据见 [长时与续算记录](docs/validation/m6_long_run.md)；独立后处理/研究准备新增26项，相关98项实际通过，见 [后处理记录](docs/validation/m6_postprocess.md)。
 
 ## 固体与流体验证
 
@@ -274,7 +277,7 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m fsi_ice fsi2 \
 
 ## FSI2 瞬态（M6/T24，进行中）
 
-FSI2 的来源参数、余弦入口启动、BDF1/BDF2 与四种求解路径（fixed、aitken、iqn、monolithic）已接入同一全场事务。IQN 历史在每步内建立，跨步及失败重试冷启动；监测新增 `iqn_updates` 与 `iqn_restarts`（仅分区路径），用于区分实际拟牛顿更新与松弛回退。稳定周期与加密研究尚未完成，不能将短程结果称为基准精度合格解，见 [本轮记录](docs/validation/m6_iqn_transient.md) 与历史 [T24 记录](docs/validation/t24.md)。
+FSI2 的来源参数、余弦入口启动、BDF1/BDF2 与四种求解路径（fixed、aitken、iqn、monolithic）已接入同一全场事务。IQN 历史在每步内建立，跨步及失败重试冷启动；监测新增 `iqn_updates` 与 `iqn_restarts`（仅分区路径），用于区分实际拟牛顿更新与松弛回退。细网格IQN的12秒稳定周期与参考精度已通过；其他算法完整周期及独立加密研究尚未完成，不能将短程结果称为基准精度合格解，见 [本轮记录](docs/validation/m6_iqn_transient.md) 与历史 [T24 记录](docs/validation/t24.md)。
 
 运行启动区间：
 

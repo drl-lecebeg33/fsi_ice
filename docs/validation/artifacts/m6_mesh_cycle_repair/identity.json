@@ -1,0 +1,26 @@
+{
+  "source_digest": "16306679ecf6fc1a4b540fee88bf227a67e62b9a623732d285072f32a7cf9e8a",
+  "files": {
+    "results/m6/frequency_accuracy_precision/time_half/report.json": "e07dd0625fcacdd4f4c021e6f8115d51e74370c46a70f1b57814f83db9013bb2",
+    "results/m6/frequency_accuracy_precision/time_half/solution.npz": "ac32919762a97ba8b73d546693cbaf424a38d3fdbd39840637cbec4d215230e5",
+    "results/m6/frequency_accuracy_precision/time_half/run.log": "25fa12a3c6720706cfba81b446109d0ebc978a5da77e7cf800f10559d44d9c10",
+    "results/m6/frequency_accuracy_precision/time_half/analysis.log": "848bd08244d6f5dd4fe8910c62055ab56ceb72a9521f0ea73268bb93adacdae9",
+    "results/m6/frequency_accuracy_precision/time_half/config.json": "2837f61f73ff631070dfecf67f5a31e0577a6992741dcad4f77618fc9088abc8",
+    "results/m6/frequency_accuracy_precision/time_half/monitor.csv": "057799b20cce68db01588e590c1e3602591315ce895d103a93a17aa3d35d7c76",
+    "results/m6/frequency_accuracy_precision/time_half/checkpoint.npz": "36566d5ac6b37b0ecde1fb6b5ee336e436d2f3f913f2d5bb47bf464af57bb7f2",
+    "results/m6/frequency_accuracy_precision/time_half/experiment.json": "58b7ee8222d899266f9807d6f31e6f6cdb7e7161da6a852feb00bb2905dd94ce",
+    "results/m6/frequency_accuracy_precision/time_half/mesh/fsi1.geo": "437ca19b4473fb2b1d57b79c3e26d38c4f788c0ecc8d8ea78946ea8ba46c1238",
+    "results/m6/frequency_accuracy_precision/time_half/mesh/fsi1.msh": "e0f96b40f0cdacdf0ca7bbc789b88b651a3c5a7b4a51a5796a6a02501ad7c666",
+    "results/m6/frequency_accuracy_precision/time_half/mesh/gmsh.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "results/m6/frequency_accuracy_precision/space_half/run.log": "8e2ba9ef79ff5e892756aa5ab7da9d97b2a8d10ed332ecffe0d70930a78225ed",
+    "results/m6/frequency_accuracy_precision/space_half/failure.json": "6212e8fb3295a867a319eadb95ecbea78784d6a6d5cf79db6de3cceb1970d3c9",
+    "results/m6/frequency_accuracy_precision/space_half/analysis.log": "fb664b12eaab13599842fd8694ecdd2e3c06ba85337bf3a10991ea6d52422b3a",
+    "results/m6/frequency_accuracy_precision/space_half/config.json": "adbc57243355452a132637911398cdec7cab1fa23d6b66b44981c41a14aeeff9",
+    "results/m6/frequency_accuracy_precision/space_half/monitor.csv": "866cae08c64fcfdddb7a7db08b20c6c86efe691aa320aacc20d0269f7e3f26d2",
+    "results/m6/frequency_accuracy_precision/space_half/checkpoint.npz": "a68826fb0bae9238da52b87ac4018a739851bbb780236ab1cc97cabcb08275e6",
+    "results/m6/frequency_accuracy_precision/space_half/experiment.json": "44e0ca3ff9048eed04188cd6889227b060a9eacf1d6ab5628630de642653b59a",
+    "results/m6/frequency_accuracy_precision/space_half/mesh/fsi1.geo": "566e06e6be90ca987b3a0a021e28b5827f071b9a661d6d7993510479406df4be",
+    "results/m6/frequency_accuracy_precision/space_half/mesh/fsi1.msh": "eeb9e70b745cec612d33363593edf6d2a89ffe15c3d5a0e3b28d1fda6daff45d",
+    "results/m6/frequency_accuracy_precision/space_half/mesh/gmsh.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

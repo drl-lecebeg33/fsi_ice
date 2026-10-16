@@ -1,0 +1,21 @@
+{
+  "source_digest": "16306679ecf6fc1a4b540fee88bf227a67e62b9a623732d285072f32a7cf9e8a",
+  "scope": "Isolated diagnostics, not formal resumed trajectories",
+  "files": {
+    "identity.json": "398806504966f3dab3f417dc9a378fff8ea7b694b9b3d7eacf32b5e8c9ebfd45",
+    "verification.json": "24e38ef0a08da5e4a1e0d2f925b60fc2493f153f6e1186f7a01d4186bba81aa9",
+    "replay.py": "b067a147aa32d0370d095b935b7a3e79bc8681a905a03f6a0357649289e62ed8",
+    "full_tests.log": "d78d69686fb414978b50fbaf907dbc65958065d14eee2be5852b6d31c15fd639",
+    "targeted_tests.log": "d80d8021f046584724bafef41c1313ed5c1e0085d1fe83d55cc6624428073a22",
+    "solid_tests.log": "b3566aa6ad1221e6bbb908cd2a4c66821a17095053a77c2d75f1eb67df0a7321",
+    "time_half_original/result.json": "be2eea873473d850697777b4de826d244a8b941e4bf1b53bedd932d045cabb48",
+    "time_half_original/solid_failure.json": "5c174fcdf39aac7fc6963e45a6d46e962f52ed3d97348fc6158501e4d47c1a70",
+    "space_half_original/result.json": "371da5880d094ea5d50f093fd7254454a6e4fb7fa650fea02071f9b54a133fbc",
+    "space_half_original/solid_failure.json": "f9c0e796f444b94a414dea72d5e9e46d08abe11d83d6197caee15b6ad190bfd0",
+    "time_half_fixed_original/result.json": "5955766e3db2a5e1fcbdcb99f19c65fe718c568a6b4188d55f69152ee551475c",
+    "space_half_fixed_original/result.json": "06fef655038c1b84c205c072223e1174ac4d7b7efd962316d6331d540fc543e2",
+    "large_amplitude_fixed_original/result.json": "35c016c2f8734f0230f83a252d1d44177b9ea43e118cdaf2ee6ce421c6ea4329",
+    "first_time_fixed_original/result.json": "d8caacef3d0da8886980c6978a70dbcc9a0493c72376752e233226b6d4575e64",
+    "first_space_fixed_original/result.json": "e5ed5ac39e6464b6c5d7c3cef20046e17fd43506868889962bf858c7e262c45a"
+  }
+}

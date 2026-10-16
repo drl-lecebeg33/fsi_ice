@@ -1,0 +1,299 @@
+{
+  "case": "fsi2",
+  "status": "PASS",
+  "checks": {
+    "target_time_complete": true,
+    "periodic_validation_complete": true,
+    "stable": true,
+    "tip_y_amplitude_relative": true,
+    "frequency_relative": true,
+    "drag_mean_relative": true
+  },
+  "timestamp": "2026-10-15T02:56:23.878321+08:00",
+  "config": {
+    "case": "fsi2",
+    "mesh_size": 0.01,
+    "dt": 0.01,
+    "end_time": 12.0,
+    "order": 2,
+    "method": "iqn",
+    "fluid": {
+      "density": 1000.0,
+      "dynamic_viscosity": 1.0,
+      "mean_velocity": 1.0
+    },
+    "solid": {
+      "density": 10000.0,
+      "poisson": 0.4,
+      "young": 1400000.0,
+      "thickness": 1.0
+    },
+    "coupling": {
+      "relaxation": 0.5,
+      "absolute_tolerance": 1e-13,
+      "relative_tolerance": 1e-12,
+      "max_iterations": 160,
+      "iqn_initial_relaxation": 0.5,
+      "iqn_alpha_max": 10.0,
+      "iqn_history_size": 10,
+      "iqn_restart_tolerance": 1.0
+    },
+    "solver": {
+      "single_field_tolerance": 1e-10,
+      "newton_atol": 1e-10,
+      "newton_rtol": 1e-12,
+      "max_iterations": 40
+    },
+    "acceptance": {
+      "residual_max": 1e-07,
+      "continuity_max": 1e-10,
+      "minimum_mesh_quality": 0.1,
+      "period_variation_max": 0.02,
+      "amplitude_variation_max": 0.02,
+      "mean_variation_max": 0.02,
+      "tip_y_amplitude_relative_max": 0.1,
+      "frequency_relative_max": 0.05,
+      "drag_mean_relative_max": 0.1
+    },
+    "reference": {
+      "tip_y_amplitude": 0.0816,
+      "frequency": 1.93,
+      "drag_mean": 215.06
+    },
+    "provenance": {
+      "verified_on": "2026-10-12",
+      "table": "FSI2 4+0, source labels timestep 0.0005",
+      "url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+      "definition_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+      "force": "cylinder plus beam, per unit depth",
+      "reference_time_integrator": "not asserted to match project BDF",
+      "status": "reference targets; project periodic validation pending"
+    },
+    "mesh_motion": {
+      "model": "weighted_harmonic",
+      "length": 0.005,
+      "power": 1.5
+    }
+  },
+  "definitions": {
+    "scope": "physical trajectory; PASS requires stable cycles and reference gates",
+    "residual": "max_i |T21 constrained R_i/S_i|; blocks S=(1,1000,.41,1,.41,215.06)",
+    "force": "cylinder + beam, N per unit depth",
+    "restart": "explicit full-history checkpoint only",
+    "reference": {
+      "verified_on": "2026-10-12",
+      "table": "FSI2 4+0, source labels timestep 0.0005",
+      "url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+      "definition_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+      "force": "cylinder plus beam, per unit depth",
+      "reference_time_integrator": "not asserted to match project BDF",
+      "status": "reference targets; project periodic validation pending"
+    }
+  },
+  "results": {
+    "status": "PASS",
+    "statistics": {
+      "tip_y": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 1.95935657343682,
+        "amplitude": 0.08071841137370706,
+        "mean": 0.001098795000945605,
+        "period_variation": 0.00016538735165376735,
+        "amplitude_variation": 0.0016920597645467908,
+        "mean_variation": 0.0003613309361709088,
+        "waveform_variation": 0.0030369216177998193,
+        "cycle_boundaries": [
+          10.029390926994852,
+          10.539719985080136,
+          11.05013345217698,
+          11.56050580453745
+        ],
+        "window": [
+          10.029390926994852,
+          11.56050580453745
+        ]
+      },
+      "drag": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 1.95935657343682,
+        "amplitude": 77.53771887704633,
+        "mean": 201.38344391122573,
+        "period_variation": 0.00016538735165376735,
+        "amplitude_variation": 0.0035393177358767837,
+        "mean_variation": 0.0012419576744717147,
+        "waveform_variation": 0.012735272901169714,
+        "cycle_boundaries": [
+          10.029390926994852,
+          10.539719985080136,
+          11.05013345217698,
+          11.56050580453745
+        ],
+        "window": [
+          10.029390926994852,
+          11.56050580453745
+        ]
+      },
+      "lift": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 1.95935657343682,
+        "amplitude": 243.35903212473127,
+        "mean": 2.882058442063754,
+        "period_variation": 0.00016538735165376735,
+        "amplitude_variation": 0.0028350383282451045,
+        "mean_variation": 0.00018448630795009764,
+        "waveform_variation": 0.004531727789812646,
+        "cycle_boundaries": [
+          10.029390926994852,
+          10.539719985080136,
+          11.05013345217698,
+          11.56050580453745
+        ],
+        "window": [
+          10.029390926994852,
+          11.56050580453745
+        ]
+      }
+    },
+    "independent_peak_statistics": {
+      "tip_y": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 1.95935657343682,
+        "amplitude": 0.08071841137370706,
+        "mean": 0.001098795000945605,
+        "period_variation": 0.00016538735165376735,
+        "amplitude_variation": 0.0016920597645467908,
+        "mean_variation": 0.0003613309361709088,
+        "waveform_variation": 0.0030369216177998193,
+        "cycle_boundaries": [
+          10.029390926994852,
+          10.539719985080136,
+          11.05013345217698,
+          11.56050580453745
+        ],
+        "window": [
+          10.029390926994852,
+          11.56050580453745
+        ]
+      },
+      "drag": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 3.9168112466969873,
+        "amplitude": 77.18029376940899,
+        "mean": 201.2289268815708,
+        "period_variation": 0.002976883815713367,
+        "amplitude_variation": 0.009415613522940243,
+        "mean_variation": 0.0014887963823753596,
+        "waveform_variation": 0.08983670976599983,
+        "cycle_boundaries": [
+          11.034832226369021,
+          11.29040668069417,
+          11.545221107632699,
+          11.800761399629508
+        ],
+        "window": [
+          11.034832226369021,
+          11.800761399629508
+        ]
+      },
+      "lift": {
+        "resolved": true,
+        "cycles": 3,
+        "frequency": 1.9591840290315958,
+        "amplitude": 243.16795618051142,
+        "mean": 2.8369686589417213,
+        "period_variation": 7.224460490460025e-05,
+        "amplitude_variation": 0.001983813237362081,
+        "mean_variation": 0.00026992988929710045,
+        "waveform_variation": 0.0050638395796174475,
+        "cycle_boundaries": [
+          10.25257333722855,
+          10.762978936398445,
+          11.273419435286028,
+          11.783823059329883
+        ],
+        "window": [
+          10.25257333722855,
+          11.783823059329883
+        ]
+      }
+    },
+    "cycle_definition": "Common tip-y peak-to-peak physical cycles; force frequencies here are cycle rates, not spectral peaks",
+    "waveform_variation_limit": 0.02,
+    "drag_mean": 201.38343874248739,
+    "errors": {
+      "tip_y_amplitude_relative": 0.010803782184962585,
+      "frequency_relative": 0.01521065981182379,
+      "drag_mean_relative": 0.06359416561663078
+    },
+    "checks": {
+      "stable": true,
+      "tip_y_amplitude_relative": true,
+      "frequency_relative": true,
+      "drag_mean_relative": true
+    }
+  },
+  "code": {
+    "commit": "63ea9af6451900f0e8630be750c27a8521fccedc",
+    "working_tree": "modified",
+    "changes": [
+      " M README.md",
+      " M agent.md",
+      " M docs/principles/index.html",
+      " M gola.md",
+      " M scripts/fsi2_analyze.py",
+      " M spec.md",
+      " M src/fsi_ice/coupling/transient.py",
+      " M src/fsi_ice/solid/stvk.py",
+      " M src/fsi_ice/validation/fsi2.py",
+      " M tests/test_fsi2.py",
+      " M tests/test_m6_repair.py",
+      " M tests/test_stvk_time.py",
+      "?? cases/fsi2_frequency_space_half.json",
+      "?? cases/fsi2_frequency_time_half.json",
+      "?? cases/fsi2_mesh15_baseline.json",
+      "?? cases/fsi2_mesh15_space_half.json",
+      "?? cases/fsi2_mesh15_time_half.json",
+      "?? docs/development/m6_12s_continue_plan.md",
+      "?? docs/development/m6_cycle_window_plan.md",
+      "?? docs/development/m6_frequency_accuracy_plan.md",
+      "?? docs/development/m6_mesh_cycle_plan.md",
+      "?? docs/development/m6_precision_floor_plan.md",
+      "?? docs/development/m6_refinement_repair_plan.md",
+      "?? docs/validation/artifacts/m6_12s/",
+      "?? docs/validation/artifacts/m6_frequency_diagnosis/",
+      "?? docs/validation/artifacts/m6_mesh_cycle_repair/",
+      "?? docs/validation/artifacts/m6_precision_floor/",
+      "?? docs/validation/artifacts/m6_refinement_repair/",
+      "?? docs/validation/m6_12s_run.md",
+      "?? docs/validation/m6_frequency_diagnosis.md",
+      "?? docs/validation/m6_mesh_cycle_repair.md",
+      "?? docs/validation/m6_precision_floor.md",
+      "?? docs/validation/m6_refinement_repair.md",
+      "?? tests/data/"
+    ]
+  },
+  "environment": {
+    "python": "3.12.3",
+    "executable": "/home/iceberg/桌面/tmp/fsi_ice/.venv/bin/python",
+    "packages": {
+      "fsi-ice": "0.1.0",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "matplotlib": "3.11.2"
+    }
+  },
+  "accepted_steps": 1200,
+  "mesh_sha256": "eeb9e70b745cec612d33363593edf6d2a89ffe15c3d5a0e3b28d1fda6daff45d",
+  "source_sha256": "cb58278f3dbde144477824b9e5e0c4db04f0935a8f37d31ffac20b452597cf27",
+  "resumed_steps": 0,
+  "accepted_time": 11.999999999999789,
+  "threads": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1"
+  }
+}

@@ -1,0 +1,4 @@
+FSI2 iqn step 1, t=0.0100, R=6.69e-10
+FSI2 iqn step 2, t=0.0200, R=1.58e-10
+FSI2 iqn step 3, t=0.0300, R=1.28e-08
+INCOMPLETE: report saved to /home/iceberg/桌面/tmp/fsi_ice/results/m6/mesh_cycle_repair/space_smoke/report.json

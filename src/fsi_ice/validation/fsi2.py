@@ -112,8 +112,10 @@ def cycle_statistics(times, signal, *, prominence, cycles=3):
     """Last complete peak-to-peak cycles; means are time-weighted, not midranges.
 
     中文：对信号末尾 cycles 个完整峰-峰周期做统计：find_peaks 找峰后对每个峰用二次
-    多项式拟合微调峰时刻，再计算周期、幅值（半峰-峰）与时间加权均值（用梯形积分除以
-    周期，而非简单中点）。样本须有限、时间严格递增；峰数不足 cycles+1 时返回
+    多项式拟合微调峰时刻，再在这些细化时刻之间插入线性插值边界，计算同一周期的
+    幅值（半峰-峰）与时间加权均值（用梯形积分除以该周期长度，而非简单中点）。
+    不能混用采样峰下标和细化峰时刻，否则不同采样步数会伪造均值漂移。
+    样本须有限、时间严格递增；峰数不足 cycles+1 时返回
     {"resolved": False}。
     """
     times, signal = np.asarray(times, dtype=float), np.asarray(signal, dtype=float)
@@ -132,18 +134,39 @@ def cycle_statistics(times, signal, *, prominence, cycles=3):
         a, b, _ = np.polyfit(local_times, signal[peak-1:peak+2], 2)
         shift = -b/(2*a) if a < 0 else 0.
         peak_times.append(float(times[peak]+np.clip(shift, local_times[0], local_times[-1])))
+    return _statistics_on_cycles(times, signal, peak_times)
+
+
+def _statistics_on_cycles(times, signal, peak_times):
+    """Statistics on common physical cycles, with a phase-aligned shape check.
+
+    Force waveforms can contain several peaks in one structural period. Their
+    peaks are not independent FSI cycles. Compare at the union of all sample
+    phases: the maximum difference of piecewise-linear interpolants occurs at
+    these breakpoints. Normalize the largest range by mean cycle amplitude.
+    """
+    times, signal = np.asarray(times), np.asarray(signal)
     periods = np.diff(peak_times)
-    amplitudes, means = [], []
-    for first, last in zip(peaks[:-1], peaks[1:]):
-        values = signal[first:last+1]
+    cycles = len(periods)
+    amplitudes, means, phases = [], [], []
+    for first, last in zip(peak_times[:-1], peak_times[1:]):
+        sample_times = np.r_[first, times[(times > first) & (times < last)], last]
+        values = np.interp(sample_times, times, signal)
+        phases.extend((sample_times-first)/(last-first))
         amplitudes.append(float(np.ptp(values)/2))
-        means.append(float(np.trapezoid(values, times[first:last+1])/(times[last]-times[first])))
+        means.append(float(np.trapezoid(values, sample_times)/(last-first)))
+    phases = np.unique(phases)
+    waveforms = [np.interp(first+phases*(last-first), times, signal)
+                 for first,last in zip(peak_times[:-1], peak_times[1:])]
     scale = max(abs(float(np.mean(means))), float(np.mean(amplitudes)), np.finfo(float).tiny)
     return {"resolved": True, "cycles": cycles, "frequency": float(1/np.mean(periods)),
         "amplitude": float(np.mean(amplitudes)), "mean": float(np.mean(means)),
         "period_variation": float(np.ptp(periods)/np.mean(periods)),
         "amplitude_variation": float(np.ptp(amplitudes)/max(np.mean(amplitudes), np.finfo(float).tiny)),
         "mean_variation": float(np.ptp(means)/scale),
+        "waveform_variation": float(np.max(np.ptp(waveforms, axis=0))/
+            max(float(np.mean(amplitudes)), np.finfo(float).tiny)),
+        "cycle_boundaries": list(peak_times),
         "window": [peak_times[0], peak_times[-1]]}
 
 
@@ -152,23 +175,34 @@ def analyze_fsi2(rows, config):
 
     rows 为逐时刻监测记录；仅取 t>=2 的末段（跳过启动瞬态）。状态语义：样本或完整
     周期不足、或周期尚未稳定时返回 "INCOMPLETE"；待周期稳定后，按 tip_y 幅值/频率、
-    drag 均值相对误差给出 "PASS"/"FAIL"。drag 均值在一个完整 tip_y 周期窗口上积分。
+    drag 均值相对误差给出 "PASS"/"FAIL"。三信号统一使用tip_y完整周期，力的多峰
+    不当作独立周期；同相位波形变化也须通过原幅值变化门槛。保留独立寻峰结果供诊断。
     """
     late = [row for row in rows if row["time"] >= 2.]
     # t<2 视为启动瞬态，样本太短无法判定周期性。
     if len(late) < 3:
         return {"status": "INCOMPLETE", "reason": "No post-startup periodic window", "checks": {}}
     times = [row["time"] for row in late]
-    stats = {name: cycle_statistics(times, [row[name] for row in late], prominence=prominence)
+    peaks = {name: cycle_statistics(times, [row[name] for row in late], prominence=prominence)
              for name, prominence in (("tip_y", .005), ("drag", 5.), ("lift", 5.))}
-    if not all(stat["resolved"] for stat in stats.values()):
-        return {"status": "INCOMPLETE", "reason": "Insufficient resolved complete cycles", "statistics": stats, "checks": {}}
+    if not peaks["tip_y"]["resolved"]:
+        return {"status": "INCOMPLETE", "reason": "Insufficient resolved complete cycles",
+                "statistics": {name: {"resolved": False, "reason": "Insufficient tip-motion cycles"}
+                               for name in peaks}, "independent_peak_statistics": peaks, "checks": {}}
+    boundaries = peaks["tip_y"]["cycle_boundaries"]
+    stats = {name: _statistics_on_cycles(times, [row[name] for row in late], boundaries)
+             for name in ("tip_y", "drag", "lift")}
+    diagnostics = {"independent_peak_statistics": peaks,
+                   "cycle_definition": "Common tip-y peak-to-peak physical cycles; force frequencies here are cycle rates, not spectral peaks",
+                   "waveform_variation_limit": config["acceptance"]["amplitude_variation_max"]}
     acceptance = config["acceptance"]
     # 周期/幅值/均值的相对波动均须落在阈值内，才认为响应已进入稳定周期。
     stable = all(stat[key] <= acceptance[key+"_max"] for stat in stats.values()
                  for key in ("period_variation", "amplitude_variation", "mean_variation"))
+    stable = stable and all(stat["waveform_variation"] <= acceptance["amplitude_variation_max"]
+                            for stat in stats.values())
     if not stable:
-        return {"status": "INCOMPLETE", "reason": "Periodic response has not stabilized", "statistics": stats, "checks": {"stable": False}}
+        return {"status": "INCOMPLETE", "reason": "Periodic response has not stabilized", "statistics": stats, **diagnostics, "checks": {"stable": False}}
     # Drag is evaluated over the y-motion window, which covers full FSI cycles.
     first, last = stats["tip_y"]["window"]
     window_times = np.r_[first, [time for time in times if first < time < last], last]
@@ -179,7 +213,7 @@ def analyze_fsi2(rows, config):
               "frequency_relative": abs(stats["tip_y"]["frequency"]/reference["frequency"]-1),
               "drag_mean_relative": abs(drag_mean/reference["drag_mean"]-1)}
     checks = {name: error <= acceptance[name+"_max"] for name, error in errors.items()}
-    return {"status": "PASS" if all(checks.values()) else "FAIL", "statistics": stats,
+    return {"status": "PASS" if all(checks.values()) else "FAIL", "statistics": stats, **diagnostics,
             "drag_mean": drag_mean, "errors": errors, "checks": {"stable": True, **checks}}
 
 

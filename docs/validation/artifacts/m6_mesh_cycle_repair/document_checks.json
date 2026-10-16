@@ -1,0 +1,10 @@
+{
+  "html_balanced": true,
+  "unique_ids": 16,
+  "local_links": 225,
+  "markdown_links_passed": true,
+  "artifact_and_fixture_hashes_passed": true,
+  "responsive_css_static": true,
+  "browser_layout_screenshots": false,
+  "scientific_figure_visually_inspected": true
+}

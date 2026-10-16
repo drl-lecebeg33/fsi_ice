@@ -96,7 +96,7 @@ def test_step_passes_gate_derived_inner_absolute_tolerances(monkeypatch):
     monkeypatch.setattr(transient_module, "solve_flow_step", flow_step)
     monkeypatch.setattr(transient_module, "solve_solid_step", solid_step)
     residual_max = 1e-7
-    driver.step("iqn", coupling={**COUPLING, "iqn_initial_relaxation": .5,
+    state = driver.step("iqn", coupling={**COUPLING, "iqn_initial_relaxation": .5,
                                  "iqn_restart_tolerance": 1., "iqn_history_size": 10},
                 newton=NEWTON, residual_max=residual_max)
     assert {kind for kind, _ in recorded} == {"flow", "solid"}
@@ -104,7 +104,8 @@ def test_step_passes_gate_derived_inner_absolute_tolerances(monkeypatch):
     solid_scale = float(np.max(driver.scales[driver.layout.slice_of("v_s")]))
     for kind, value in recorded:
         expected = .1*residual_max*(fluid_scale if kind == "flow" else solid_scale)
-        assert value == pytest.approx(expected)
+        assert .001*expected*(1-1e-12) <= value <= expected
+    assert 0 <= state.monitoring[-1]["inner_refinements"] <= 3
 
 
 def test_partitioned_step_waits_for_full_physics_gate(monkeypatch):
@@ -256,6 +257,30 @@ def test_periodic_analysis_is_time_weighted_and_short_runs_incomplete():
     assert stats["mean"] == pytest.approx(2, abs=1e-4)
 
 
+@pytest.mark.parametrize("frequency,phase,offset", [
+    (1.93, 0., 0.), (2.184, .37, 0.), (2.184, 1.8, .02), (2.2, .91, 215.)])
+def test_refined_cycles_preserve_analytic_stationary_mean(frequency, phase, offset):
+    # Noninteger samples per period must not fabricate drift in an exactly
+    # stationary signal; the independent reference is its analytic mean.
+    times = np.arange(0., 12.005, .01)
+    amplitude = .0816
+    signal = offset+amplitude*np.sin(2*np.pi*frequency*times+phase)
+    stats = cycle_statistics(times, signal, prominence=.005)
+    assert stats["mean"] == pytest.approx(offset, abs=2e-4*amplitude)
+    assert stats["frequency"] == pytest.approx(frequency, rel=2e-5)
+    assert stats["amplitude"] == pytest.approx(amplitude, rel=.003)
+    assert stats["mean_variation"] < .002
+    assert stats["amplitude_variation"] < .004
+    assert stats["period_variation"] < 5e-5
+
+
+def test_refined_cycles_still_detect_analytic_mean_drift():
+    times = np.arange(0., 12.005, .01)
+    signal = .0816*np.sin(2*np.pi*2.184*times)+.01*times
+    stats = cycle_statistics(times, signal, prominence=.005)
+    assert stats["mean_variation"] > .05
+
+
 def test_input_failure_clears_old_success(tmp_path):
     (tmp_path/"report.json").write_text('{"status":"PASS"}')
     (tmp_path/"solution.npz").write_bytes(b"stale")
@@ -331,3 +356,100 @@ def test_invalid_physics_gates_cannot_accept_a_step(kwargs):
     with pytest.raises(ValueError):
         driver.step(**kwargs)
     assert driver.coordinator.state.step == 0 and driver.coordinator.active is None
+
+
+def test_near_interface_noise_refines_fields_and_recovers_same_physics(monkeypatch):
+    controls = {**COUPLING, "iqn_initial_relaxation": .5,
+                "iqn_restart_tolerance": 1., "iqn_history_size": 10}
+    baseline, driver = small_problem(), small_problem()
+    expected = baseline.step("iqn", coupling=controls, newton=NEWTON)
+    original = transient_module.solve_solid_step
+    tolerances = []
+    def noisy(*args, **kwargs):
+        state, result = original(*args, **kwargs)
+        tolerances.append(kwargs.get("correction_tolerance"))
+        if kwargs.get("correction_tolerance") is None or kwargs["correction_tolerance"] > 1e-15:
+            state = state.copy()
+            state[0, -1, 1] += (-1 if len(tolerances) % 2 else 1)*1e-12
+        return state, result
+    monkeypatch.setattr(transient_module, "solve_solid_step", noisy)
+    actual = driver.step("iqn", coupling=controls, newton=NEWTON)
+    assert actual.monitoring[-1]["inner_refinements"] == 3
+    assert actual.monitoring[-1]["residual"] <= 1e-7
+    assert len(tolerances) > actual.monitoring[-1]["coupling_iterations"]
+    np.testing.assert_allclose(driver._initial_vector(actual), baseline._initial_vector(expected),
+                               rtol=1e-8, atol=1e-10)
+
+
+@pytest.mark.parametrize("failure", ["field_error", "persistent_noise"])
+def test_inner_refinement_is_bounded_and_failure_rolls_back(monkeypatch, failure):
+    driver = small_problem()
+    before = driver.coordinator.state
+    original = transient_module.solve_solid_step
+    tolerances = []
+    def noisy(*args, **kwargs):
+        tolerances.append(kwargs.get("correction_tolerance"))
+        if failure == "field_error" and len(tolerances) > 1:
+            raise RuntimeError("diagnostic tighter field failed")
+        state, result = original(*args, **kwargs)
+        state = state.copy()
+        state[0] = kwargs["initial"]
+        state[0, -1, 1] += 1e-12
+        return state, result
+    monkeypatch.setattr(transient_module, "solve_solid_step", noisy)
+    with pytest.raises(RuntimeError):
+        driver.step("fixed", coupling={**COUPLING, "max_iterations": 8}, newton=NEWTON)
+    assert driver.coordinator.state is before
+    assert tolerances[0] is None
+    assert all(t is None or t > 0 for t in tolerances)
+    if failure == "persistent_noise":
+        assert len(set(t for t in tolerances if t is not None)) >= 3
+        assert len(tolerances) == 11  # 8 outer evaluations plus 3 bounded refinements
+
+
+def test_multipeak_forces_use_full_motion_cycles():
+    config = load_fsi2_config(ROOT/'cases/fsi2.json')
+    times = np.arange(2., 8., .002)
+    phase = 2*np.pi*1.93*times
+    rows = [dict(time=float(t), tip_y=float(y), drag=float(d), lift=float(l))
+            for t,y,d,l in zip(times, .0816*np.sin(phase),
+                215.06+77.65*np.sin(2*phase), 100*np.sin(phase)+180*np.sin(3*phase))]
+    result = analyze_fsi2(rows, config)
+    assert result['status'] == 'PASS'
+    assert result['independent_peak_statistics']['lift']['period_variation'] > config['acceptance']['period_variation_max']
+    for stat in result['statistics'].values():
+        assert stat['frequency'] == pytest.approx(1.93, rel=1e-5)
+        assert stat['cycle_boundaries'] == result['statistics']['tip_y']['cycle_boundaries']
+        assert stat['waveform_variation'] < .002
+    assert result['statistics']['lift']['mean'] == pytest.approx(0., abs=.01)
+
+
+@pytest.mark.parametrize('kind', ['phase_drift', 'subharmonic', 'mean_drift'])
+def test_common_cycle_analysis_does_not_hide_force_instability(kind):
+    config = load_fsi2_config(ROOT/'cases/fsi2.json')
+    times = np.arange(2., 8., .002)
+    phase = 2*np.pi*1.93*times
+    lift = 150*np.sin(phase)
+    if kind == 'phase_drift':
+        lift = 150*np.sin(phase + .3*times)
+    elif kind == 'subharmonic':
+        lift += 30*np.sin(phase/2)
+    else:
+        lift += 10*times
+    rows = [dict(time=float(t), tip_y=float(y), drag=float(d), lift=float(l))
+            for t,y,d,l in zip(times, .0816*np.sin(phase),215.06+77.65*np.sin(2*phase),lift)]
+    result = analyze_fsi2(rows, config)
+    assert result['status'] == 'INCOMPLETE'
+    assert not result['checks']['stable']
+    assert result['statistics']['lift']['waveform_variation'] > .02
+
+
+def test_force_peaks_cannot_replace_missing_motion_cycles():
+    config = load_fsi2_config(ROOT/'cases/fsi2.json')
+    times = np.arange(2., 8., .002)
+    rows = [dict(time=float(t), tip_y=0., drag=215.06+70*np.sin(4*np.pi*t),
+                 lift=150*np.sin(2*np.pi*t)) for t in times]
+    result = analyze_fsi2(rows, config)
+    assert result['status'] == 'INCOMPLETE'
+    assert not any(s['resolved'] for s in result['statistics'].values())
+    assert result['independent_peak_statistics']['lift']['resolved']

@@ -72,9 +72,10 @@ def test_ale_cache_matches_fresh_assembly_and_isolates_density_history_geometry(
         ale_module.history_mass_load(alien,context)
 
 
-def test_weighted_mesh_translation_and_tangential_affine_patch():
+@pytest.mark.parametrize("power", [1., 1.5])
+def test_weighted_mesh_translation_and_tangential_affine_patch(power):
     mesh=rectangle_mesh(8)
-    extension=build_interface_weighted_extension(mesh, interface_tag='bottom', length=.1)
+    extension=build_interface_weighted_extension(mesh, interface_tag='bottom', length=.1, power=power)
     nodes=mesh.boundary_nodes()
     exact=np.column_stack((.02+.03*mesh.points[:,0], -.01*np.ones(mesh.n_nodes)))
     result=extension.extend(nodes,exact[nodes])
@@ -83,24 +84,29 @@ def test_weighted_mesh_translation_and_tangential_affine_patch():
     assert result.boundary_error==0
 
 
-def test_weighted_mesh_normal_manufactured_solution_converges():
+@pytest.mark.parametrize("power", [1., 1.5])
+def test_weighted_mesh_normal_manufactured_solution_converges(power):
     length=.1
+    from scipy.integrate import quad
     def primitive(y):
-        return y*np.sqrt(y*y+length*length)+length*length*np.arcsinh(y/length)
+        return np.array([quad(lambda z: (np.sqrt(z*z+length*length)/length)**power,
+                              0., float(value), epsabs=1e-12)[0]
+                         for value in np.asarray(y).reshape(-1)]).reshape(np.asarray(y).shape)
     errors=[]
     for n in (8,16,32):
         mesh=rectangle_mesh(n)
         exact=.02*primitive(mesh.points[:,1])/primitive(1.)
         nodes=mesh.boundary_nodes()
-        extension=build_interface_weighted_extension(mesh,interface_tag='bottom',length=length)
+        extension=build_interface_weighted_extension(mesh,interface_tag='bottom',length=length,power=power)
         result=extension.extend(nodes,np.column_stack((exact[nodes],np.zeros(len(nodes)))))
         errors.append(np.max(np.abs(result.values[:,0]-exact)))
     assert errors[1]<errors[0]/3 and errors[2]<errors[1]/3, errors
 
 
-def test_weighted_mesh_full_coupled_jacobian():
+@pytest.mark.parametrize("power", [1., 1.5])
+def test_weighted_mesh_full_coupled_jacobian(power):
     problem=build_problem(nx=3,ny_fluid=2,order=2)
-    extension=build_interface_weighted_extension(problem.fluid,interface_tag='interface',length=.05)
+    extension=build_interface_weighted_extension(problem.fluid,interface_tag='interface',length=.05,power=power)
     context=replace(problem.context,harmonic=extension)
     direction=np.random.default_rng(923).normal(size=len(problem.x))*problem.variable_scales
     # Perturb one matching interface: independent random traces would crack it.
@@ -120,11 +126,12 @@ def test_weighted_mesh_full_coupled_jacobian():
 
 
 @pytest.mark.parametrize('order',[1,2])
-def test_weighted_four_methods_and_checkpoint_retry(tmp_path,order):
+@pytest.mark.parametrize('power',[1.,1.5])
+def test_weighted_four_methods_and_checkpoint_retry(tmp_path,order,power):
     drivers={method:small_problem(order) for method in ('fixed','aitken','iqn','monolithic')}
     def weighted(driver):
         driver.harmonic=build_interface_weighted_extension(driver.topology.fluid_mesh,
-                           interface_tag='fluid-interface',length=.05)
+                           interface_tag='fluid-interface',length=.05,power=power)
         return driver
     drivers={m:weighted(d) for m,d in drivers.items()}
     config=load_fsi2_config(ROOT/'cases/fsi2.json')
@@ -170,3 +177,35 @@ def test_bad_mesh_motion_config_rejected(motion):
 def test_weighted_extension_invalid_controls(kwargs):
     with pytest.raises(ValueError):
         build_interface_weighted_extension(rectangle_mesh(2),**{'interface_tag':'bottom',**kwargs})
+
+
+def test_power15_preserves_real_fine_mesh_large_deflection():
+    from fsi_ice.mesh import TriMesh
+    from fsi_ice.ale import build_ale_geometry
+    with np.load(ROOT/'tests/data/mesh_large_deflection/space927.npz', allow_pickle=False) as data:
+        mesh = TriMesh(data['points'],data['cells'],
+                       {k[4:]:data[k] for k in data.files if k.startswith('tag_')})
+        nodes, boundary = data['nodes'],data['boundary']
+    extension = build_interface_weighted_extension(mesh,interface_tag='fluid-interface',length=.005,power=1.5)
+    free = np.setdiff1d(np.arange(mesh.n_nodes),nodes)
+    for scale in (1., 1.15, 1.3):
+        result = extension.extend(nodes,scale*boundary)
+        geo = build_ale_geometry(mesh,result.values,candidate_id='scaled geometry stress fixture')
+        assert geo.minimum_volume_ratio >= .2 and geo.minimum_quality >= .1
+        np.testing.assert_array_equal(result.values[nodes], scale*boundary)
+        # Independently verify the same stiffness used by the monolithic block.
+        residual = extension.stiffness @ result.values
+        assert np.max(np.abs(residual[free])) < 1e-12
+
+
+def test_mesh15_research_configs_change_only_mesh_weight():
+    import json
+    names = ['baseline','time_half','space_half']
+    configs = {n:load_fsi2_config(ROOT/f'cases/fsi2_mesh15_{n}.json') for n in names}
+    baseline = configs['baseline']
+    for name,key in [('time_half','dt'),('space_half','mesh_size')]:
+        cfg = copy.deepcopy(configs[name]);cfg[key]=baseline[key]
+        assert cfg == baseline
+        original=load_fsi2_config(ROOT/f'cases/fsi2_frequency_{name}.json')
+        restored=copy.deepcopy(configs[name]);restored['mesh_motion']['power']=1.
+        assert restored==original

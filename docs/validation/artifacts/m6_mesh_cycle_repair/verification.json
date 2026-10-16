@@ -1,0 +1,53 @@
+{
+  "source_digest": "cb58278f3dbde144477824b9e5e0c4db04f0935a8f37d31ffac20b452597cf27",
+  "old_files_unchanged": true,
+  "physical_solver_unchanged": true,
+  "replays": {
+    "space_half_power15_original": {
+      "steps": [
+        928,
+        929,
+        930,
+        931,
+        932,
+        933,
+        934,
+        935,
+        936,
+        937
+      ],
+      "maximum_residual": 5.0939779505654315e-08,
+      "minimum_volume_ratio": 0.3619238101095831,
+      "minimum_quality": 0.4625666327047611,
+      "scope": "Local diagnostic only; old history under changed mesh equation"
+    },
+    "time_half_power15_original": {
+      "steps": [
+        2401,
+        2402,
+        2403,
+        2404,
+        2405
+      ],
+      "maximum_residual": 3.240867751941323e-08,
+      "minimum_volume_ratio": 0.7294290672745307,
+      "minimum_quality": 0.6613461157147381,
+      "scope": "Local diagnostic only; old history under changed mesh equation"
+    },
+    "space_half_final_confirm_original": {
+      "steps": [
+        928
+      ],
+      "maximum_residual": 3.1517075615994372e-09,
+      "minimum_volume_ratio": 0.3921473803976394,
+      "minimum_quality": 0.4625666327047611,
+      "scope": "Local diagnostic only; old history under changed mesh equation"
+    }
+  },
+  "source_guards": {
+    "time_half": "Checkpoint mesh/source identity does not match this run.",
+    "space_half": "Checkpoint mesh/source identity does not match this run."
+  },
+  "final_source_fresh_checkpoint_steps": 3,
+  "supervisor_integration_passed": true
+}

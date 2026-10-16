@@ -1,0 +1,22 @@
+{
+  "scope": "Solid subproblem snapshots captured from failed coupled steps; regression fixtures, not benchmark solutions",
+  "source_digest": "e59c9b7c293921b3d649cead5d8d0f355095913bfc01d4ecf5f145b249112d1d",
+  "material": {
+    "young": 1400000.0,
+    "poisson": 0.4,
+    "density": 10000.0,
+    "thickness": 1.0
+  },
+  "files": {
+    "time_half.npz": {
+      "sha256": "7539c20fea3aa981b63e738d19b60abf9c77cee2b1121b9b76f055bbae90ce2b",
+      "failed_step": 1368,
+      "original_snapshot_sha256": "6a1b5823f236c553e42b72ac2ac1b9c35136e6263169da8aa578be378a2b1272"
+    },
+    "space_half.npz": {
+      "sha256": "eeba557670640faf1da9195ea8766df6fbca696d7c1938ab9d5e0516ba2d66ff",
+      "failed_step": 486,
+      "original_snapshot_sha256": "b164adb0adb0a582f5b1a3603dc3313a817d52b73543c155f25a2f9f5b3f9b58"
+    }
+  }
+}

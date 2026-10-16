@@ -1,0 +1,11 @@
+{
+  "source_digest": "6792c3e517e1e8ba5af74ab20a6423943a2b7d39e0604595f844c537f2f46023",
+  "original_inputs": {
+    "results/m6/frequency_accuracy/time_half/trajectory/failure.json": "81752a37a12106c1e707e89d8e5d41da17706198546b017858166a3bc18f59a8",
+    "results/m6/frequency_accuracy/time_half/trajectory/monitor.csv": "ae4407c424d660a17677bac3f2b34b826b34d78fad3dd11d852e9d977e653fb7",
+    "results/m6/frequency_accuracy/time_half/trajectory/checkpoint.npz": "d33dd82468e0991d599c2ac3faab91d2c43a8baee4589c73f51c2ab09e30a228",
+    "results/m6/frequency_accuracy/space_half/trajectory/failure.json": "d93a6deeb9e730410761a82636df2f824b513e286fe26109f103f04c6dfb3b92",
+    "results/m6/frequency_accuracy/space_half/trajectory/monitor.csv": "b402ff4b989a3756ee77a5486571b20aa14cb1d841606c896a52f93cb67d2c30",
+    "results/m6/frequency_accuracy/space_half/trajectory/checkpoint.npz": "3456b3bbad262fee23ecc6ad9ce0c0971788bda764adeb5a5e076ed82435347f"
+  }
+}

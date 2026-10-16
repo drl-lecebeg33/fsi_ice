@@ -47,12 +47,12 @@ def stvk_residual(mesh, material, displacement, external=None):
         raise ValueError("Displacement must be a finite (n_nodes,2) array.")
     gradients = physical_gradients(mesh)
     # 中文：变形梯度 F = I + ∇u，其中 u 按单元节点取值。
-    deformation = np.eye(2)+np.einsum("eai,eaJ->eiJ", displacement[mesh.cells], gradients)
+    gradient = np.einsum("eai,eaJ->eiJ", displacement[mesh.cells], gradients)
+    deformation = np.eye(2)+gradient
     determinants = np.linalg.det(deformation)
     if np.any(determinants <= 0) or not np.all(np.isfinite(determinants)):
         raise ValueError("Solid deformation has a non-positive Jacobian.")
-    # 中文：右 Cauchy–Green 应变 E = (FᵀF - I)/2。
-    strain = 0.5*(np.einsum("ekI,ekJ->eIJ", deformation, deformation)-np.eye(2))
+    strain = _green_strain(gradient)
     lam, mu = material.lame
     # 中文：第二 Piola 应力 S = λ tr(E) I + 2μ E，再乘 F 得第一 Piola 应力 P。
     second_piola = lam*np.trace(strain, axis1=1, axis2=2)[:, None, None]*np.eye(2)+2*mu*strain
@@ -94,6 +94,13 @@ class NonlinearSolidSolution:
     reactions: np.ndarray
     nonlinear_history: tuple
     minimum_jacobian: float
+    linear_solves: int = 0
+
+
+def _green_strain(gradient):
+    """E = sym(H) + H.T H/2, avoiding cancellation in (F.T F - I)/2."""
+    return 0.5*(gradient + gradient.transpose(0, 2, 1) +
+                gradient.transpose(0, 2, 1) @ gradient)
 
 
 def stvk_energy(mesh, material, displacement, external):
@@ -102,9 +109,8 @@ def stvk_energy(mesh, material, displacement, external):
     中文：返回标量势能 = ∫ [λ/2 tr(E)² + μ |E|²] dA·t - external·u，其中 E 为
     右 Cauchy–Green 应变，最后一项为外力做功（external 与位移均按交错自由度排列）。
     """
-    deformation = np.eye(2)+np.einsum("eai,eaJ->eiJ", displacement[mesh.cells], physical_gradients(mesh))
-    # 中文：应变 E = (FᵀF - I)/2，储能密度 = λ/2 tr(E)² + μ tr(E²)。
-    strain = 0.5*(deformation.transpose(0, 2, 1) @ deformation-np.eye(2))
+    gradient = np.einsum("eai,eaJ->eiJ", displacement[mesh.cells], physical_gradients(mesh))
+    strain = _green_strain(gradient)
     lam, mu = material.lame
     density = 0.5*lam*np.trace(strain, axis1=1, axis2=2)**2+mu*np.sum(strain**2, axis=(1, 2))
     return float(np.dot(mesh.areas*material.thickness, density)-np.dot(np.asarray(external), displacement.ravel()))
@@ -112,19 +118,25 @@ def stvk_energy(mesh, material, displacement, external):
 
 def solve_stvk(mesh, material, external, fixed_nodes, *, prescribed=(0.0, 0.0), initial=None,
                tolerance=1e-9, max_iterations=40, absolute_tolerance=None,
-               mass_coefficient=0.0, mass_rhs=None):
+               mass_coefficient=0.0, mass_rhs=None, correction_tolerance=None):
     """用 Newton 迭代求解 StVK 非线性固体平衡。
 
     中文：``external`` 为节点外力（交错自由度）；``fixed_nodes`` 为约束节点，
     ``prescribed`` 为其位移值；``initial`` 为位移初值；``tolerance`` 为相对残差容
     差，``absolute_tolerance`` 为可选的自由残差绝对上限。``mass_coefficient`` 与
-    ``mass_rhs`` 在时间离散时叠加惯性项 α²M 及其历史右端。返回
+    ``mass_rhs`` 在时间离散时叠加惯性项 α²M 及其历史右端。
+    可选 ``correction_tolerance`` 要求剩余Newton位移修正的无穷范数不超过给定米数；
+    它是残差条件之外的附加条件，不替代残差。返回值记录全部线性求解（含精度认证）。返回
     :class:`NonlinearSolidSolution`；未收敛则抛出 ``RuntimeError``。
     """
     if not np.isfinite(tolerance) or tolerance <= 0 or not isinstance(max_iterations, int) or max_iterations < 1:
         raise ValueError("Invalid nonlinear solid solve controls.")
     if absolute_tolerance is not None and (not np.isfinite(absolute_tolerance) or absolute_tolerance <= 0):
         raise ValueError("absolute_tolerance must be a finite positive real number when provided.")
+    if correction_tolerance is not None and (isinstance(correction_tolerance, (bool, np.bool_)) or
+            not isinstance(correction_tolerance, (int, float, np.integer, np.floating)) or
+            not np.isfinite(correction_tolerance) or correction_tolerance <= 0):
+        raise ValueError("correction_tolerance must be a finite positive real scalar when provided.")
     fixed_nodes = np.asarray(fixed_nodes)
     if fixed_nodes.ndim != 1 or not np.issubdtype(fixed_nodes.dtype, np.integer) or np.any(fixed_nodes < 0) or np.any(fixed_nodes >= mesh.n_nodes):
         raise ValueError("Invalid fixed solid nodes.")
@@ -163,6 +175,7 @@ def solve_stvk(mesh, material, external, fixed_nodes, *, prescribed=(0.0, 0.0), 
         return energy
 
     history = []
+    linear_solves = 0
     for iteration in range(max_iterations+1):
         residual, matrix = evaluate(values)
         norm = float(np.linalg.norm(residual[free])/scale)
@@ -170,16 +183,26 @@ def solve_stvk(mesh, material, external, fixed_nodes, *, prescribed=(0.0, 0.0), 
         # The relative criterion scales with the external load magnitude; the
         # optional absolute bound keeps the raw free residual below a caller-given
         # limit (used by the coupled driver to meet its absolute acceptance gate).
-        if norm <= tolerance and (absolute_tolerance is None or
-                                  float(np.linalg.norm(residual[free])) <= absolute_tolerance):
+        residual_converged = norm <= tolerance and (absolute_tolerance is None or
+                                  float(np.linalg.norm(residual[free])) <= absolute_tolerance)
+        correction = None
+        if residual_converged and correction_tolerance is not None:
+            # Certify displacement accuracy without asking the force residual to
+            # fall below its floating-point floor. Residual gates still apply.
+            correction = solve_dirichlet(matrix, -residual, dofs, 0.0).values.reshape(-1, 2)
+            linear_solves += 1
+        if residual_converged and (correction is None or
+                                  np.max(np.abs(correction)) <= correction_tolerance):
             # 中文：收敛后返回位移、支反力、残差历史与最小变形梯度行列式。
             deformation = np.eye(2)+np.einsum("eai,eaJ->eiJ", values[mesh.cells], physical_gradients(mesh))
             return NonlinearSolidSolution(values, residual.reshape(-1, 2), tuple(history),
-                                          float(np.linalg.det(deformation).min()))
+                                          float(np.linalg.det(deformation).min()), linear_solves)
         if iteration == max_iterations:
             break
         # 中文：Newton 修正由约束系统 K Δu = -r 求得（约束自由度的修正为零）。
-        correction = solve_dirichlet(matrix, -residual, dofs, 0.0).values.reshape(-1, 2)
+        if correction is None:
+            correction = solve_dirichlet(matrix, -residual, dofs, 0.0).values.reshape(-1, 2)
+            linear_solves += 1
         energy = potential(values)
         slope = float(np.dot(residual, correction.ravel()))
         step = 1.0

@@ -1,0 +1,106 @@
+{
+  "status": "ACCEPTED_DIAGNOSTIC_ONLY",
+  "step": 515,
+  "monitor": {
+    "time": 2.5749999999999673,
+    "step": 515,
+    "order": 2,
+    "method": "iqn",
+    "solve_seconds": 5.220892661018297,
+    "residual": 2.1711814568448062e-09,
+    "continuity": 1.866299700283504e-18,
+    "minimum_cell_determinant": 4.7488819117861596e-05,
+    "minimum_volume_ratio": 0.9908581679480709,
+    "minimum_quality": 0.7247696729532546,
+    "interface_gap_error": 0.0,
+    "interface_gap_tolerance": 1e-12,
+    "minimum_solid_jacobian": 0.9996278498264356,
+    "interface_normal_error": 0.0,
+    "interface_surface_ratio_error": 9.547918011776346e-15,
+    "fluid_solves": 14,
+    "solid_solves": 14,
+    "newton_iterations": 34,
+    "linear_solves": 34,
+    "fluid_factorizations": 1,
+    "fluid_krylov_iterations": 34,
+    "coupling_iterations": 11,
+    "iqn_updates": 9,
+    "iqn_restarts": 0,
+    "inner_refinements": 3,
+    "interface_residual": 7.702066457515318e-15,
+    "relaxation": 0.08374814132852466,
+    "tip_x": -2.090273510449518e-05,
+    "tip_y": 0.001326144341437775,
+    "drag": 133.3408924891724,
+    "lift": 1.0231743214593463
+  },
+  "source_digest": "e59c9b7c293921b3d649cead5d8d0f355095913bfc01d4ecf5f145b249112d1d",
+  "seconds": 5.506056661019102,
+  "original_step": 514,
+  "config": {
+    "case": "fsi2",
+    "mesh_size": 0.02,
+    "dt": 0.005,
+    "end_time": 12.0,
+    "order": 2,
+    "method": "iqn",
+    "fluid": {
+      "density": 1000.0,
+      "dynamic_viscosity": 1.0,
+      "mean_velocity": 1.0
+    },
+    "solid": {
+      "density": 10000.0,
+      "poisson": 0.4,
+      "young": 1400000.0,
+      "thickness": 1.0
+    },
+    "coupling": {
+      "relaxation": 0.5,
+      "absolute_tolerance": 1e-13,
+      "relative_tolerance": 1e-12,
+      "max_iterations": 160,
+      "iqn_initial_relaxation": 0.5,
+      "iqn_alpha_max": 10.0,
+      "iqn_history_size": 10,
+      "iqn_restart_tolerance": 1.0
+    },
+    "solver": {
+      "single_field_tolerance": 1e-10,
+      "newton_atol": 1e-10,
+      "newton_rtol": 1e-12,
+      "max_iterations": 40
+    },
+    "acceptance": {
+      "residual_max": 1e-07,
+      "continuity_max": 1e-10,
+      "minimum_mesh_quality": 0.1,
+      "period_variation_max": 0.02,
+      "amplitude_variation_max": 0.02,
+      "mean_variation_max": 0.02,
+      "tip_y_amplitude_relative_max": 0.1,
+      "frequency_relative_max": 0.05,
+      "drag_mean_relative_max": 0.1
+    },
+    "reference": {
+      "tip_y_amplitude": 0.0816,
+      "frequency": 1.93,
+      "drag_mean": 215.06
+    },
+    "provenance": {
+      "verified_on": "2026-10-12",
+      "table": "FSI2 4+0, source labels timestep 0.0005",
+      "url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_tests/fsi_fsi_tests.html",
+      "definition_url": "https://wwwold.mathematik.tu-dortmund.de/~featflow/en/benchmarks/cfdbenchmarking/fsi_benchmark/fsi_definitions.html",
+      "force": "cylinder plus beam, per unit depth",
+      "reference_time_integrator": "not asserted to match project BDF",
+      "status": "reference targets; project periodic validation pending"
+    },
+    "mesh_motion": {
+      "model": "weighted_harmonic",
+      "length": 0.005,
+      "power": 1.0
+    }
+  },
+  "scope": "Isolated candidate replay, not a resumable new-source trajectory"
+}

@@ -40,6 +40,126 @@ T20 已提供正式 FSI1 双域网格入口与稳态分区求解。三档网格�
 .venv/bin/python -m fsi_ice fsi1 --config cases/fsi1.json --output results/t20/fsi1
 ```
 
+## 代码结构与主要文件
+
+仓库顶层：`src/fsi_ice/` 求解器源码、`tests/` pytest 测试、`scripts/` 研究/后处理脚本、`cases/` JSON 算例配置、`docs/` 原理与验证文档、`results/` 运行输出（默认不入 Git）。下表按子包列出主要代码文件与职责。
+
+### 入口与命令行
+
+| 文件 | 职责 |
+| --- | --- |
+| [`__init__.py`](src/fsi_ice/__init__.py) | 顶层包初始化与版本号；说明按领域拆分的子包结构。 |
+| [`__main__.py`](src/fsi_ice/__main__.py) | `python -m fsi_ice` 模块入口，转交 `cli.main` 并以退出码退出。 |
+| [`cli.py`](src/fsi_ice/cli.py) | `fsi-ice` 命令行入口：分派 `poisson`、`partitioned-check`、`fsi1`/`fsi2`、`solid`/`fluid`/`single-fields`/`csm3`/`cfd3`、`test` 子命令；退出码 0=PASS、1=FAIL、2=参数/运行错误、3=fsi2 INCOMPLETE。 |
+
+### 网格与有限元基础（`mesh/`、`fem/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`mesh/triangular.py`](src/fsi_ice/mesh/triangular.py) | 带校验的逆时针 P1 三角形网格 `TriMesh`：单元质量检查、外边界标签、矩形网格生成。 |
+| [`mesh/turek.py`](src/fsi_ice/mesh/turek.py) | Turek–Hron FSI1/FSI2/CSM/CFD 参考几何与边界标签、Gmsh MSH2 读取与流/固子网格拆分（Gmsh 仅作三角剖分生成器）。 |
+| [`fem/p1.py`](src/fsi_ice/fem/p1.py) | 标量 P1 三角形形函数与梯度（仿射映射，局部自由度即单元节点）。 |
+| [`fem/p2.py`](src/fsi_ice/fem/p2.py) | P2 二次三角形基，自由度含顶点与边中点，供高阶离散与误差分析。 |
+| [`fem/quadrature.py`](src/fsi_ice/fem/quadrature.py) | 参考三角形上的 1/2/5 阶正权求积规则。 |
+| [`fem/poisson.py`](src/fsi_ice/fem/poisson.py) | P1 Poisson 弱形式组装、保持对称的 Dirichlet 消元与残差校验、L2/H1 误差范数。 |
+
+### 固体与流体单场（`solid/`、`fluid/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`solid/linear.py`](src/fsi_ice/solid/linear.py) | 平面小变形线弹性：常应变 P1 单元、平面应力/平面应变、一致体积力与边界线面力；位移自由度交错排列。 |
+| [`solid/stvk.py`](src/fsi_ice/solid/stvk.py) | 总拉格朗日 P1 StVK 有限变形固体（平面应变）、解析一致切线、Newton 求解。 |
+| [`solid/dynamics.py`](src/fsi_ice/solid/dynamics.py) | 固体 BDF 时间离散（`d'=v`、`ρv'=Div(P)+f`）：消去速度后解 StVK，返回新位移/速度历史。 |
+| [`fluid/taylor_hood.py`](src/fsi_ice/fluid/taylor_hood.py) | Taylor–Hood P2/P1 不可压缩流离散：动量/连续方程装配、压力钉点、对称鞍点形式。 |
+| [`fluid/ale.py`](src/fsi_ice/fluid/ale.py) | 单候选步 ALE 流场上下文：BDF 质量项、GCL 扫掠输运、相对网格速度对流及残差/Jacobian 贡献。 |
+| [`fluid/dynamics.py`](src/fsi_ice/fluid/dynamics.py) | BDF 流场单步求解入口（固定网格/ALE 两分支），候选求解不修改已接受历史。 |
+| [`fluid/forces.py`](src/fsi_ice/fluid/forces.py) | 共享 Cauchy 应力核与固体边界受力（阻力/升力）监控，单位深度。 |
+| [`fluid/linear_solver.py`](src/fsi_ice/fluid/linear_solver.py) | 全 Newton 线性系统求解器 `ReusedLUSolver`：GMRES + 自适应复用 LU 预条件。 |
+
+### ALE 网格运动（`ale/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`ale/harmonic.py`](src/fsi_ice/ale/harmonic.py) | Laplace 调和扩展：把边界位移扩展到内部节点；参考网格刚度只装配一次并复用。 |
+| [`ale/geometry.py`](src/fsi_ice/ale/geometry.py) | 由参考网格 + 绝对 P1 位移构造候选构型；变形梯度、体积比与单元质量诊断（拒绝翻转）。 |
+| [`ale/kinematics.py`](src/fsi_ice/ale/kinematics.py) | 由 P1 位移 BDF 时间导数计算网格速度；P2 边中点速度按两端点线性插值。 |
+| [`ale/gcl.py`](src/fsi_ice/ale/gcl.py) | 相邻 P1 构型间的离散 GCL 扫掠通量与几何源；逐单元/边/总体积守恒缺陷诊断。 |
+
+### 界面映射与载荷（`interface/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`interface/topology.py`](src/fsi_ice/interface/topology.py) | 湿界面参照构形一次性匹配：端点对应、P2←P1 标量映射 `h` 与交错耦合矩阵 `H`。 |
+| [`interface/mapping.py`](src/fsi_ice/interface/mapping.py) | 通过 `H` 在固体 P1 迹与流体 P2 迹间映射运动与对偶载荷（只读、不推进历史）。 |
+| [`interface/geometry.py`](src/fsi_ice/interface/geometry.py) | 冻结候选界面几何：逐边当前积分点、长度、双侧外法向、`F_s` 与面比。 |
+| [`interface/traction.py`](src/fsi_ice/interface/traction.py) | 用流体 Cauchy 应力迹在界面求积点上装配载荷（流体作用在固体上）。 |
+| [`interface/checks.py`](src/fsi_ice/interface/checks.py) | 固定界面映射的代数一致性诊断：显式 `passed`、数值与所用尺度。 |
+
+### 时间推进与全场事务（`time/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`time/bdf.py`](src/fsi_ice/time/bdf.py) | 定步长 BDF1/BDF2 模板与不可变接受历史：显式权重、`generation` 代次、commit/restore。 |
+| [`time/transaction.py`](src/fsi_ice/time/transaction.py) | 全场步事务：唯一 `AcceptedState` 根、私有工作区、原子接受与回滚/重试，FSI2 与整体路径共用。 |
+
+### 耦合求解（`coupling/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`coupling/partitioned.py`](src/fsi_ice/coupling/partitioned.py) | Dirichlet–Neumann 分区迭代：`fixed`、scaled Aitken、IQN-ILS 更新；以未松弛界面残差判收敛，回调不得接受历史。 |
+| [`coupling/monolithic.py`](src/fsi_ice/coupling/monolithic.py) | 整体残差、完整耦合 Jacobian 与矩阵自由 JVP（未知量 `[u_f, p_f, d_s, v_s, d_m, g]`）。 |
+| [`coupling/newton.py`](src/fsi_ice/coupling/newton.py) | 通用阻尼 Newton 原型，只依赖纯 `evaluate(x)` 契约，供整体耦合复用。 |
+| [`coupling/monolithic_newton.py`](src/fsi_ice/coupling/monolithic_newton.py) | 整体 Newton 集成与伪时间 BDF 定常推进 `march_to_steady`。 |
+| [`coupling/transient.py`](src/fsi_ice/coupling/transient.py) | 分区/整体共享的物理 BDF 步：候选求解 + 全场原子接受，是 FSI2 时间推进的公共入口。 |
+
+### 验证与基准驱动（`validation/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`validation/common.py`](src/fsi_ice/validation/common.py) | 各验证共用产物工具：CSV/JSON 报告（Asia/Shanghai 时间戳、状态、版本与环境）、收敛阶估计、配置校验。 |
+| [`validation/poisson.py`](src/fsi_ice/validation/poisson.py) | Poisson 制造解 `sin(πx)sin(πy)` 多网格收敛验证与结果图。 |
+| [`validation/solid.py`](src/fsi_ice/validation/solid.py) | 固体单场：悬臂梁 Euler–Bernoulli 对照、CSM1/CSM2 基准、StVK 制造解时间收敛。 |
+| [`validation/fluid.py`](src/fsi_ice/validation/fluid.py) | 流体单场：Stokes/Navier–Stokes 制造解空间收敛、Poiseuille、CFD1/CFD2 固定体基准。 |
+| [`validation/transient.py`](src/fsi_ice/validation/transient.py) | CSM3/CFD3 物理推进、独立网格/时间步研究、周期诊断与 `--postprocess-only` 重算报告。 |
+| [`validation/partitioned.py`](src/fsi_ice/validation/partitioned.py) | 分区耦合校验（T18）：BDF1 非定常 Stokes + 线弹性，对照同离散块直接解。 |
+| [`validation/fsi1.py`](src/fsi_ice/validation/fsi1.py) | 稳态 Turek–Hron FSI1 分区验证：三档网格、梁尖位移/圆柱力门槛与报告。 |
+| [`validation/fsi2.py`](src/fsi_ice/validation/fsi2.py) | FSI2 瞬态驱动与 CLI：逐接受步监测、周期统计；短程/未稳定如实记 `INCOMPLETE`。 |
+| [`validation/fsi2_checkpoint.py`](src/fsi_ice/validation/fsi2_checkpoint.py) | FSI2 已接受根与 BDF 历史的原子、无 pickle 断点持久化与恢复校验。 |
+| [`validation/monolithic.py`](src/fsi_ice/validation/monolithic.py) | 整体残差与 Jacobian 的方向导数（中心差分）一致性检查。 |
+| [`validation/monolithic_case.py`](src/fsi_ice/validation/monolithic_case.py) | 整体稳态 FSI1 运行器与 T23 一致性/成本比较的公共辅助。 |
+
+### 研究脚本（`scripts/`）
+
+| 文件 | 职责 |
+| --- | --- |
+| [`check_environment.py`](scripts/check_environment.py) | 只读检查 Python 研究环境，不运行物理求解器。 |
+| [`m5_compare.py`](scripts/m5_compare.py) | M5/T23 分区 vs 整体一致性与成本研究：`prepare`/`partitioned`/`monolithic`/`compare` 四阶段。 |
+| [`t24_compare.py`](scripts/t24_compare.py) | 两个 FSI2 短程轨迹的只读末态比较（非周期验收）。 |
+| [`fsi2_analyze.py`](scripts/fsi2_analyze.py) | 只读分析 FSI2 接受历史/断点，生成 JSON/Markdown、周期 CSV 与时程图。 |
+| [`fsi2_mesh_animation.py`](scripts/fsi2_mesh_animation.py) | 仅用断点中真实保留的网格/固体状态生成动网格动画（GIF/MP4/离线播放页）。 |
+| [`m6_benchmark.py`](scripts/m6_benchmark.py) | 对冻结源码快照重复运行 FSI2 短程并计时（要求机器空闲）。 |
+| [`m6_mesh_probe.py`](scripts/m6_mesh_probe.py) | 只读网格运动对照：用已保存梁位移加人工缩放边界输入。 |
+| [`m6_prepare_study.py`](scripts/m6_prepare_study.py) | 仅准备 T26 收敛/算法成本配置与命令，不启动求解器。 |
+
+### 测试（`tests/`）
+
+| 测试文件 | 覆盖内容 |
+| --- | --- |
+| `test_mesh.py`、`test_fsi1_mesh.py` | 网格校验、Turek–Hron 几何与子域拆分。 |
+| `test_fem.py`、`test_poisson.py` | 形函数/求积、Poisson 组装与收敛。 |
+| `test_solid.py`、`test_stvk_time.py` | 线弹性、StVK 与固体 BDF 时间步。 |
+| `test_fluid.py`、`test_flow_linear_solver.py` | Taylor–Hood 装配、边界力与复用 LU 线性求解器。 |
+| `test_ale_mesh.py`、`test_ale_fluid.py` | ALE 网格层与 ALE 流场残差/切线、GCL 健康与回滚。 |
+| `test_interface.py` | 界面拓扑、运动/载荷映射、当前几何与真实载荷。 |
+| `test_time.py`、`test_transaction.py` | BDF 显式模板与全场事务原子接受/回滚/重试。 |
+| `test_partitioned.py`、`test_partitioned_integration.py`、`test_aitken.py`、`test_iqn.py`、`test_coupling_review.py` | 分区耦合三种算法、配置/CLI 与独立复核。 |
+| `test_newton.py`、`test_monolithic_residual.py`、`test_monolithic_newton.py`、`test_monolithic_review.py` | 通用 Newton、整体残差/Jacobian、Newton 集成与独立复核。 |
+| `test_transient.py` | 分区/整体共享瞬态步。 |
+| `test_single_fields.py` | 单场验证入口。 |
+| `test_fsi1.py`、`test_fsi2.py`、`test_fsi2_checkpoint.py` | FSI1/FSI2 驱动、多步一致性与断点续算。 |
+| `test_m5_consistency.py`、`test_m6_repair.py`、`test_m6_postprocess.py`、`test_mesh_animation.py` | M5 比较辅助、M6 加权网格修复/后处理与动画。 |
+| `test_cli.py` | 命令行分派与退出码。 |
+
 ## 本地环境
 
 采用 Python 3.12、NumPy、SciPy、Matplotlib 和 pytest。完整版本固定在 `requirements.txt`，使用项目内 `.venv` 隔离依赖。
